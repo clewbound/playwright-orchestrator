@@ -86,7 +86,7 @@ export class MySQLAdapter extends BaseAdapter {
                     position: `${line}:${pos}`,
                     projects,
                     status: report?.status ?? TestStatus.Ready,
-                    title: report?.title ?? '',
+                    title: report?.title ?? `${file}:${line}:${pos}`,
                     lastSuccessfulRunTimestamp: report?.lastSuccessfulRun,
                 };
             }),

@@ -5,6 +5,7 @@ import { calculateTrend, formatDuration } from './helpers.js';
 
 export async function ghaReporter(data: TestRunReport) {
     const { tests } = data;
+    const completedTests = tests.filter((test) => test.status !== TestStatus.Ready);
     await core.summary
         .addHeading(`🏃 Test run summary`)
         .addDetails('Run config', buildConfigData(data))
@@ -18,7 +19,7 @@ export async function ghaReporter(data: TestRunReport) {
                 { data: '✨ Last successful run', header: true },
                 { data: '❌ Fails', header: true },
             ],
-            ...tests.map((test) => {
+            ...completedTests.map((test) => {
                 const { percentage, trendIcon } = calculateTrend(test);
                 return [
                     test.status === TestStatus.Passed ? '✅' : '❌',

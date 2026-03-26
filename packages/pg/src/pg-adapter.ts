@@ -52,7 +52,7 @@ export class PostgreSQLAdapter extends BaseAdapter {
                 file,
                 position: `${line}:${character}`,
                 projects,
-                title: report?.title,
+                title: report?.title ?? `${file}:${line}:${character}`,
                 lastSuccessfulRunTimestamp: report?.lastSuccessfulRun,
             })),
         };
