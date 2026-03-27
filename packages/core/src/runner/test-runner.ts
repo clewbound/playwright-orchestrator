@@ -9,6 +9,7 @@ import type { ShardHandler } from '../adapters/shard-handler.js';
 import type { BatchHandlerFactory } from '../commands/run.js';
 import { BrowserManager } from './browser-manager.js';
 import { WebServerManager } from './web-server-manager.js';
+import { SetupManager } from '../helpers/setup-manager.js';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { SYMBOLS } from '../symbols.js';
@@ -26,6 +27,7 @@ export class TestRunner {
         @inject(SYMBOLS.ShardHandler) private readonly shardHandler: ShardHandler,
         @inject(SYMBOLS.BrowserManager) private readonly browserManager: BrowserManager,
         @inject(SYMBOLS.WebServerManager) private readonly webServerManager: WebServerManager,
+        @inject(SYMBOLS.SetupManager) private readonly setupManager: SetupManager,
         @inject(SYMBOLS.BatchHandlerFactory) private readonly batchHandlerFactory: BatchHandlerFactory,
         @inject(SYMBOLS.TestExecutionReporter) private readonly reporter: TestExecutionReporter,
         @inject(SYMBOLS.TestEventHandlerFactory) private readonly testEventHandlerFactory: TestEventHandlerFactory,
@@ -45,19 +47,48 @@ export class TestRunner {
             process.exitCode = 1;
             return false;
         }
-        const [browsers] = await Promise.all([
-            this.browserManager.runBrowsers(config),
-            this.webServerManager.startServers(config),
-        ]);
-        config.configFile = await this.createTempConfig(config.configFile);
-        if (config.configFile) {
-            this.cleanupFs.add(config.configFile);
-        }
+
+        const originalConfigFile = config.configFile;
+        let setupSucceeded = false;
 
         try {
+            // NOTE: Setup runs independently on each shard. In distributed deployments this is
+            // intentional — each machine needs its own setup state (auth tokens, storage state, etc.).
+            // Users should ensure globalSetup and dependency projects are idempotent and safe to run
+            // concurrently across shards.
+            if (config.setup && originalConfigFile) {
+                await this.setupManager.runSetup(config.setup, originalConfigFile);
+                setupSucceeded = true;
+            }
+
+            // Exclude dependency/teardown projects from browser launches — their tests are not
+            // scheduled by the orchestrator, so launching browser servers for them wastes resources.
+            if (config.setup) {
+                const excludeSet = new Set([...config.setup.dependencyProjects, ...config.setup.teardownProjects]);
+                if (excludeSet.size > 0) {
+                    config.projects = config.projects.filter((p) => !excludeSet.has(p.name));
+                }
+            }
+
+            const [browsers] = await Promise.all([
+                this.browserManager.runBrowsers(config),
+                this.webServerManager.startServers(config),
+            ]);
+            config.configFile = await this.createTempConfig(config.configFile);
+            if (config.configFile) {
+                this.cleanupFs.add(config.configFile);
+            }
+
             await this.runTestsUntilAvailable(config, browsers);
         } finally {
             this.reporter.printSummary();
+            if (setupSucceeded && config.setup && originalConfigFile) {
+                try {
+                    await this.setupManager.runTeardown(config.setup, originalConfigFile);
+                } catch (err) {
+                    console.error('Global teardown failed:', err instanceof Error ? err.message : err);
+                }
+            }
             await this.shardHandler.finishShard(this.runId);
         }
         return !this.reporter.hasFailed();
@@ -151,15 +182,20 @@ export class TestRunner {
 
     private async createTempConfig(file: string | undefined): Promise<string | undefined> {
         if (!file) return;
-        // Remove webServer from config (not supported in the orchestrator).
-        // Browser endpoints are injected via PLAYWRIGHT_ORCHESTRATOR_BROWSERS env var.
+        // Strip webServer (handled by WebServerManager), globalSetup/globalTeardown and
+        // project dependencies (handled by SetupManager). The orchestrator owns lifecycle
+        // and scheduling. Browser endpoints are injected via PLAYWRIGHT_ORCHESTRATOR_BROWSERS env var.
         const content = `
 import config from '${path.resolve(file)}';
 
 const browsers: Record<string, string> = JSON.parse(process.env.PLAYWRIGHT_ORCHESTRATOR_BROWSERS ?? '{}');
 
 config.webServer = undefined;
+config.globalSetup = undefined;
+config.globalTeardown = undefined;
 for (const project of config?.projects ?? []) {
+    project.dependencies = [];
+    project.teardown = undefined;
     if (!project.use) project.use = {};
     if (!project.use.connectOptions) project.use.connectOptions = {};
     if (!project.use.connectOptions.wsEndpoint) {

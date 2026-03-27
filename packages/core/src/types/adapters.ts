@@ -1,5 +1,5 @@
 import type { TestReportResult } from './reporter.js';
-import type { RunStatus, TestConfig, TestStatus } from './test-info.js';
+import type { RunStatus, SetupConfig, TestConfig, TestStatus } from './test-info.js';
 import type { TestDetailsAnnotation } from '@playwright/test';
 
 export const BatchMode = {
@@ -19,6 +19,7 @@ export interface TestRunConfig extends TestConfig {
     args: string[];
     options: BaseOptions;
     version?: string;
+    setup?: SetupConfig;
 }
 
 export interface TestRun {

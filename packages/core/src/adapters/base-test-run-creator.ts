@@ -30,6 +30,18 @@ export abstract class BaseTestRunCreator implements TestRunCreator {
     async create({ runId, args, options }: SaveTestRunParams): Promise<void> {
         const reporterTestRun = await this.runInfoLoader.load(args);
         let tests = this.transformTestRunToItems(reporterTestRun.testRun, options);
+
+        const setup = reporterTestRun.setup;
+        if (setup && (setup.dependencyProjects.length > 0 || setup.teardownProjects.length > 0)) {
+            const excludeSet = new Set([...setup.dependencyProjects, ...setup.teardownProjects]);
+            tests = tests
+                .map((test) => ({
+                    ...test,
+                    projects: test.projects.filter((p) => !excludeSet.has(p)),
+                }))
+                .filter((test) => test.projects.length > 0);
+        }
+
         const testInfos = await this.loadTestInfos(tests);
         tests = this.sortTests(tests, testInfos, {
             historyWindow: options.historyWindow,
@@ -38,7 +50,13 @@ export abstract class BaseTestRunCreator implements TestRunCreator {
         const config: TestRun = {
             status: RunStatus.Created,
             updated: Date.now(),
-            config: { ...reporterTestRun.config, options, args: this.cleanArgs(args), version: cliVersion },
+            config: {
+                ...reporterTestRun.config,
+                options,
+                args: this.cleanArgs(args),
+                version: cliVersion,
+                ...(setup && { setup }),
+            },
         };
         await this.saveRunData(runId, config, tests);
     }

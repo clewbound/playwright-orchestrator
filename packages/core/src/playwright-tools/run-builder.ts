@@ -1,5 +1,5 @@
 import type { FullConfig, Suite, TestCase } from '@playwright/test/reporter';
-import type { TestConfig, ReporterTestRun, ReporterTestRunInfo } from '../types/test-info.js';
+import type { TestConfig, ReporterTestRun, ReporterTestRunInfo, SetupConfig } from '../types/test-info.js';
 import path from 'node:path';
 
 interface SuiteInternal extends Suite {
@@ -18,6 +18,7 @@ function getEntryTimeout(entry: TestCase | Suite): number {
 export class RunBuilder {
     private readonly testRun: ReporterTestRun = {};
     private config: TestConfig | undefined = undefined;
+    private setup: SetupConfig | undefined = undefined;
 
     parseEntry(entry: TestCase | Suite) {
         if (this.tryParseEntry(entry)) return this;
@@ -27,7 +28,7 @@ export class RunBuilder {
         return this;
     }
 
-    parseConfig({ workers, configFile, projects }: FullConfig) {
+    parseConfig({ workers, configFile, projects, globalSetup, globalTeardown }: FullConfig) {
         this.config = {
             workers: workers,
             configFile: configFile ? path.relative(process.cwd(), configFile) : undefined,
@@ -37,6 +38,17 @@ export class RunBuilder {
                 repeatEach: project.repeatEach,
             })),
         };
+
+        const { dependencies, teardowns } = this.detectSetupAndTeardownProjects(projects);
+        if (globalSetup || globalTeardown || dependencies.length > 0 || teardowns.length > 0) {
+            this.setup = {
+                globalSetup: globalSetup ?? undefined,
+                globalTeardown: globalTeardown ?? undefined,
+                dependencyProjects: dependencies,
+                teardownProjects: teardowns,
+            };
+        }
+
         return this;
     }
 
@@ -44,7 +56,22 @@ export class RunBuilder {
         return structuredClone({
             config: this.config!,
             testRun: this.testRun,
+            ...(this.setup && { setup: this.setup }),
         });
+    }
+
+    private detectSetupAndTeardownProjects(projects: FullConfig['projects']): { dependencies: string[]; teardowns: string[] } {
+        const depNames = new Set<string>();
+        const teardownNames = new Set<string>();
+        for (const project of projects) {
+            for (const dep of project.dependencies) {
+                depNames.add(dep);
+            }
+            if (project.teardown) {
+                teardownNames.add(project.teardown);
+            }
+        }
+        return { dependencies: [...depNames], teardowns: [...teardownNames] };
     }
 
     private tryParseEntry(entry: TestCase | Suite) {

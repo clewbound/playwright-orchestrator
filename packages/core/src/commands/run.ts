@@ -11,6 +11,7 @@ import { SYMBOLS } from '../symbols.js';
 import { PlaywrightTestEventHandler, TestEventHandler, TestEventHandlerFactory } from '../runner/test-event-handler.js';
 import { WebServerManager } from '../runner/web-server-manager.js';
 import { BrowserManager } from '../runner/browser-manager.js';
+import { SetupManager } from '../helpers/setup-manager.js';
 import { TestExecutionReporter } from '../runner/test-execution-reporter.js';
 import { Container } from 'inversify';
 
@@ -64,6 +65,7 @@ function registerServices(container: Container) {
     container.bind(SYMBOLS.TestExecutionReporter).to(TestExecutionReporter).inSingletonScope();
     container.bind(SYMBOLS.BrowserManager).to(BrowserManager).inSingletonScope();
     container.bind(SYMBOLS.WebServerManager).to(WebServerManager).inSingletonScope();
+    container.bind(SYMBOLS.SetupManager).to(SetupManager).inSingletonScope();
 
     container.bind<TestRunner>(SYMBOLS.TestRunner).to(TestRunner);
 }

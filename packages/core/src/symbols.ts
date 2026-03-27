@@ -14,4 +14,5 @@ export const SYMBOLS = {
     TestExecutionReporter: Symbol.for('TestExecutionReporter'),
     TestEventHandler: Symbol.for('TestEventHandler'),
     TestEventHandlerFactory: Symbol.for('TestEventHandlerFactory'),
+    SetupManager: Symbol.for('SetupManager'),
 } as const;

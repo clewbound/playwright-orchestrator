@@ -17,6 +17,7 @@ export interface TestConfig {
 export interface ReporterTestRunInfo {
     testRun: ReporterTestRun;
     config: TestConfig;
+    setup?: SetupConfig;
 }
 
 export interface ReporterTestRun {
@@ -29,6 +30,13 @@ export interface ReporterTestRun {
             children?: string[];
         };
     };
+}
+
+export interface SetupConfig {
+    globalSetup?: string;
+    globalTeardown?: string;
+    dependencyProjects: string[];
+    teardownProjects: string[];
 }
 
 export const RunStatus = {
