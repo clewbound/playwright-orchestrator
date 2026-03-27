@@ -188,4 +188,8 @@ export class DynamoDbShardHandler implements ShardHandler {
             return false;
         }
     }
+
+    async cleanupStaleTests(_runId: string, _staleMinutes: number): Promise<number> {
+        return 0;
+    }
 }

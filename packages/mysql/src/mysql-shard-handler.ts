@@ -4,7 +4,7 @@ import { RunStatus, TestStatus } from '@playwright-orchestrator/core';
 import type { TestItem, TestRunConfig } from '@playwright-orchestrator/core';
 import type { CreateArgs } from './create-args.js';
 import { MySQLPool } from './mysql-pool.js';
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { MYSQL_CONFIG, MYSQL_POOL } from './symbols.js';
 
 interface Test extends RowDataPacket {
@@ -138,5 +138,15 @@ export class MySQLShardHandler implements ShardHandler {
             RunStatus.Finished,
             runId,
         ]);
+    }
+
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const [result] = await this.pool.query<ResultSetHeader>({
+            sql: `UPDATE ?? SET status = ?, updated = CURRENT_TIMESTAMP
+                WHERE run_id = UUID_TO_BIN(?) AND status = ?
+                AND updated < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? MINUTE)`,
+            values: [this.testsTable, TestStatus.Ready, runId, TestStatus.Ongoing, staleMinutes],
+        });
+        return result.affectedRows;
     }
 }

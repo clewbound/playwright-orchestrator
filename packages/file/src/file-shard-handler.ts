@@ -89,4 +89,8 @@ export class FileShardHandler implements ShardHandler {
             await release();
         }
     }
+
+    async cleanupStaleTests(_runId: string, _staleMinutes: number): Promise<number> {
+        return 0;
+    }
 }

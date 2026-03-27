@@ -117,4 +117,15 @@ export class PgShardHandler implements ShardHandler {
             values: [RunStatus.Finished, runId],
         });
     }
+
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const result = await this.pool.query({
+            text: `UPDATE ${this.testsTable}
+                SET status = $1, updated = NOW()
+                WHERE run_id = $2 AND status = $3
+                AND updated < NOW() - INTERVAL '1 minute' * $4`,
+            values: [TestStatus.Ready, runId, TestStatus.Ongoing, staleMinutes],
+        });
+        return result.rowCount ?? 0;
+    }
 }

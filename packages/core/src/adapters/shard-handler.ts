@@ -5,4 +5,5 @@ export interface ShardHandler {
     finishShard(runId: string): Promise<void>;
     getNextTest(runId: string, config: TestRunConfig): Promise<TestItem | undefined>;
     getNextTestByProject(runId: string, project: string): Promise<TestItem | undefined>;
+    cleanupStaleTests(runId: string, staleMinutes: number): Promise<number>;
 }

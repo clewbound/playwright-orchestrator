@@ -87,6 +87,22 @@ export class MongoShardHandler implements ShardHandler {
         return this.connection.db.collection<TestDocument>(this.testsCollection);
     }
 
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const threshold = new Date(Date.now() - staleMinutes * 60 * 1000);
+        const result = await this.tests.updateMany(
+            {
+                _id: {
+                    $gte: generateTestId(runId, 0),
+                    $lt: generateTestId(runId, MAX_ORDER),
+                },
+                status: TestStatus.Ongoing,
+                updated: { $lt: threshold },
+            },
+            { $set: { status: TestStatus.Ready, updated: new Date() } },
+        );
+        return result.modifiedCount;
+    }
+
     private generateTestIdQuery(runId: string, ...statuses: TestStatus[]) {
         return {
             _id: {

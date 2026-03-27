@@ -3,6 +3,7 @@ import init from './init.js';
 import run from './run.js';
 import create from './create.js';
 import createReport from './create-report.js';
+import cleanup from './cleanup.js';
 import { cliVersion } from './version.js';
 
 export const program = new Command();
@@ -13,5 +14,6 @@ await init();
 await run();
 await create();
 await createReport();
+await cleanup();
 
 program.parse();

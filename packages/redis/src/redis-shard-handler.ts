@@ -116,4 +116,8 @@ return nil`;
         if (!config || !status || !updated) throw new Error(`Run ${runId} not found`);
         return { status: +status as RunStatus, updated: +updated, config: JSON.parse(config) };
     }
+
+    async cleanupStaleTests(_runId: string, _staleMinutes: number): Promise<number> {
+        return 0;
+    }
 }
