@@ -3,7 +3,7 @@ import type { TestRunConfig } from '../types/adapters.js';
 import type { Project } from '../types/test-info.js';
 import { SYMBOLS } from '../symbols.js';
 import { TestExecutionReporter } from './test-execution-reporter.js';
-import { loadPlaywrightModule, PlaywrightConfigLoader, type PlaywrightConfig } from '../helpers/playwright-config.js';
+import { loadGlobalHookFn, PlaywrightConfigLoader, type PlaywrightConfig } from '../helpers/playwright-config.js';
 import { runPlaywright } from '../helpers/run-playwright.js';
 
 @injectable()
@@ -17,7 +17,7 @@ export class GlobalSetupManager {
     ) {}
 
     async runSetup(config: TestRunConfig): Promise<void> {
-        ({ loadGlobalHook: this.loadGlobalHook } = loadPlaywrightModule('playwright/lib/runner/loadUtils'));
+        this.loadGlobalHook = loadGlobalHookFn();
         await this.runGlobalSetup(config);
         await this.runSetupProjects(config);
     }

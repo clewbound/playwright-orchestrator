@@ -1,4 +1,4 @@
-import { expect } from 'vitest';
+import { expect, assert } from 'vitest';
 import { spawnAsync } from '../../packages/core/src/helpers/spawn.js';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -49,6 +49,9 @@ export async function testStorage(storageOptions: string[], reportsFolder: strin
             }),
         ),
     );
+    if (shardResults.some(({ stderr }) => stderr.toLocaleLowerCase().includes('error'))) {
+        assert.fail(`Run command failed. Errors: ${shardResults.map(({ stderr }) => stderr).join('\n')}`);
+    }
     const setupMarker = readFileSync(join(globalMarkerFolder, globalSetupMarkerFile), 'utf-8');
     const teardownMarker = readFileSync(join(globalMarkerFolder, globalTeardownMarkerFile), 'utf-8');
     // global setup and teardown + deps should be executed once per shard, so the marker files should contain the number of shards * 2
@@ -116,7 +119,7 @@ function clearReportForSnapshot(report: TestRunReport) {
                 .map((test) => ({ ...test, duration: 0, averageDuration: 0, lastSuccessfulRunTimestamp: 0, fails: 0 }))
                 .sort((a, b) => a.title.localeCompare(b.title)),
         }),
-        null,
+        (key, value) => (key === 'userAgent' ? undefined : value),
         2,
     );
 }

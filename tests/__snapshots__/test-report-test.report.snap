@@ -48,7 +48,6 @@
             "width": 1920
           },
           "trace": "on-first-retry",
-          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36",
           "viewport": {
             "height": 720,
             "width": 1280
@@ -73,7 +72,6 @@
             "width": 1920
           },
           "trace": "on-first-retry",
-          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0.1) Gecko/20100101 Firefox/146.0.1",
           "viewport": {
             "height": 720,
             "width": 1280

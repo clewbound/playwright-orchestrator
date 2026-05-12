@@ -17,6 +17,7 @@ const fs = require('fs');
 const req = createRequire(path.join(process.cwd(), 'package.json'));
 
 const version = req('@playwright/test/package.json').version;
+/** @type {string[]} */
 const passed = [];
 /** @type {{ name: string; error: string }[]} */
 const failed = [];
@@ -42,45 +43,108 @@ function assert(condition, detail) {
     if (!condition) throw new Error(detail);
 }
 
+const pwDir = path.dirname(req.resolve('playwright/package.json'));
+
+/**
+ * Loads the configLoader module from old (lib/common/configLoader.js) or new
+ * (lib/common/index.js .configLoader namespace) Playwright layouts.
+ * Result is cached — Node module cache handles re-require, but the namespace
+ * lookup only runs once so a missing namespace isn't reported twice.
+ */
+/** @type {any} */
+let _configLoaderModule;
+function loadConfigLoaderModule() {
+    if (_configLoaderModule) return _configLoaderModule;
+    const oldPath = path.join(pwDir, 'lib/common/configLoader.js');
+    if (fs.existsSync(oldPath)) return (_configLoaderModule = require(oldPath));
+    const m = require(path.join(pwDir, 'lib/common/index.js')).configLoader;
+    assert(m != null, 'configLoader namespace not found in lib/common/index.js');
+    return (_configLoaderModule = m);
+}
+
 // ── Check 1: playwright/lib/common/configLoader.loadConfig ───────────────────
+// Old Playwright: lib/common/configLoader.js  New 1.60+: lib/common/index.js configLoader namespace
 check('playwright/lib/common/configLoader.loadConfig', () => {
-    const m = req('playwright/lib/common/configLoader');
-    assert(typeof m.loadConfig === 'function', `loadConfig is ${typeof m.loadConfig} (expected function)`);
+    const m = loadConfigLoaderModule();
+    assert(typeof m.loadConfig === 'function', `loadConfig is ${typeof m?.loadConfig} (expected function)`);
 });
 
 // ── Check 2: playwright/lib/common/configLoader.resolveConfigLocation ────────
 check('playwright/lib/common/configLoader.resolveConfigLocation', () => {
-    const m = req('playwright/lib/common/configLoader');
+    const m = loadConfigLoaderModule();
     assert(
         typeof m.resolveConfigLocation === 'function',
-        `resolveConfigLocation is ${typeof m.resolveConfigLocation} (expected function)`,
+        `resolveConfigLocation is ${typeof m?.resolveConfigLocation} (expected function)`,
     );
 });
 
 // ── Check 3: playwright/lib/plugins.webServer ─────────────────────────────────
+// Old Playwright:   lib/plugins.js (single file)
+// Mid Playwright:   lib/plugins/index.js (directory)
+// New 1.60+:        lib/runner/index.js (consolidated)
 check('playwright/lib/plugins.webServer', () => {
-    const m = req('playwright/lib/plugins');
-    assert(typeof m.webServer === 'function', `webServer is ${typeof m.webServer} (expected function)`);
+    let m;
+    // require(lib/plugins) resolves both lib/plugins.js and lib/plugins/index.js
+    const pluginsPath = path.join(pwDir, 'lib/plugins');
+    if (fs.existsSync(pluginsPath + '.js') || fs.existsSync(pluginsPath)) {
+        m = require(pluginsPath);
+    } else {
+        m = require(path.join(pwDir, 'lib/runner/index.js'));
+    }
+    assert(typeof m.webServer === 'function', `webServer is ${typeof m?.webServer} (expected function)`);
 });
 
-// ── Check 4: playwright/lib/runner/loadUtils.loadGlobalHook ──────────────────
-check('playwright/lib/runner/loadUtils.loadGlobalHook', () => {
-    const pwDir = path.dirname(req.resolve('playwright/package.json'));
-    const m = require(path.join(pwDir, 'lib/runner/loadUtils.js'));
-    assert(typeof m.loadGlobalHook === 'function', `loadGlobalHook is ${typeof m.loadGlobalHook} (expected function)`);
+// ── Check 4: global hook loading mechanism ────────────────────────────────────
+// Old Playwright: lib/runner/loadUtils.js exports loadGlobalHook
+// Mid Playwright: loadGlobalHook moved to lib/runner/index.js
+// New 1.60+: loadGlobalHook removed; use transform.requireOrImport from lib/common/index.js
+check('global hook loading mechanism (loadGlobalHook or transform.requireOrImport)', () => {
+    // Old path: loadUtils.js exports loadGlobalHook directly
+    const loadUtilsPath = path.join(pwDir, 'lib/runner/loadUtils.js');
+    if (fs.existsSync(loadUtilsPath)) {
+        const m = require(loadUtilsPath);
+        assert(
+            typeof m.loadGlobalHook === 'function',
+            `loadGlobalHook is ${typeof m?.loadGlobalHook} in lib/runner/loadUtils.js`,
+        );
+        return;
+    }
+    // Mid path: loadGlobalHook consolidated into lib/runner/index.js
+    const runnerIndexPath = path.join(pwDir, 'lib/runner/index.js');
+    if (fs.existsSync(runnerIndexPath)) {
+        const m = require(runnerIndexPath);
+        if (typeof m.loadGlobalHook === 'function') return;
+    }
+    // New 1.60+ path: use transform.requireOrImport from lib/common/index.js
+    const commonPath = path.join(pwDir, 'lib/common/index.js');
+    assert(
+        fs.existsSync(commonPath),
+        `No loadGlobalHook found and lib/common/index.js missing in playwright package`,
+    );
+    const m = require(commonPath);
+    assert(
+        typeof m.transform?.requireOrImport === 'function',
+        `loadGlobalHook absent from loadUtils.js/runner/index.js and transform.requireOrImport not found in lib/common/index.js`,
+    );
 });
 
 // ── Check 5: Suite._parallelMode ─────────────────────────────────────────────
 // _parallelMode is an instance property set in the Suite constructor.
-// We load the Suite class by its absolute path to bypass package exports restrictions,
-// then instantiate it and verify the property is present on the instance — exactly
-// mirroring how run-builder.ts uses it: `(suite as SuiteInternal)._parallelMode`.
+// Old Playwright: lib/common/test.js  New 1.60+: lib/common/index.js under test namespace
+// Mirrors how run-builder.ts uses it: `(suite as SuiteInternal)._parallelMode`.
 check('Suite._parallelMode', () => {
-    const pwDir = path.dirname(req.resolve('playwright/package.json'));
-    const testJsPath = path.join(pwDir, 'lib/common/test.js');
-    assert(fs.existsSync(testJsPath), `playwright/lib/common/test.js not found at ${testJsPath}`);
-    const { Suite } = req(testJsPath);
-    assert(typeof Suite === 'function', `Suite is not a class in playwright/lib/common/test.js`);
+    let Suite;
+    const oldPath = path.join(pwDir, 'lib/common/test.js');
+    if (fs.existsSync(oldPath)) {
+        ({ Suite } = require(oldPath));
+        assert(typeof Suite === 'function', `Suite is not a class in lib/common/test.js`);
+    } else {
+        const newPath = path.join(pwDir, 'lib/common/index.js');
+        assert(fs.existsSync(newPath), `playwright/lib/common/index.js not found at ${newPath}`);
+        const m = require(newPath);
+        assert(m.test && typeof m.test.Suite === 'function', `Suite not found in lib/common/index.js test namespace`);
+        ({ Suite } = m.test);
+    }
     const instance = new Suite('', 'suite');
     assert('_parallelMode' in instance, `Suite instance has no _parallelMode property`);
 });
@@ -91,7 +155,7 @@ console.log(`PLAYWRIGHT VERSION: ${version}\n`);
 if (failed.length > 0) {
     console.log('FAILED CHECKS:');
     for (const { name, error } of failed) {
-        console.log(`  \u274c ${name}`);
+        console.log(`  ❌ ${name}`);
         console.log(`     ${error}`);
     }
     console.log('');
@@ -100,7 +164,7 @@ if (failed.length > 0) {
 if (passed.length > 0) {
     console.log('PASSED CHECKS:');
     for (const name of passed) {
-        console.log(`  \u2705 ${name}`);
+        console.log(`  ✅ ${name}`);
     }
 }
 
