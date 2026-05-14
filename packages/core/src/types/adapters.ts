@@ -6,6 +6,7 @@ export const BatchMode = {
     Off: 'off',
     Time: 'time',
     Count: 'count',
+    Smart: 'smart',
 } as const;
 export type BatchMode = (typeof BatchMode)[keyof typeof BatchMode];
 

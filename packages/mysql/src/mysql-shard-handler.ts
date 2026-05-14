@@ -157,4 +157,8 @@ export class MySQLShardHandler implements ShardHandler {
             [this.configTable, RunStatus.Finished, shardFinishedPath, runId, shardFinishedPath],
         );
     }
+
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+        return { nRemaining: 0, tRemaining: 0 };
+    }
 }

@@ -112,4 +112,8 @@ export class MongoShardHandler implements ShardHandler {
             status: { $in: statuses },
         };
     }
+
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+        return { nRemaining: 0, tRemaining: 0 };
+    }
 }

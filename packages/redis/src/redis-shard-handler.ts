@@ -134,4 +134,8 @@ return nil`;
         if (!config) throw new Error(`Run ${runId} not found`);
         return JSON.parse(config);
     }
+
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+        return { nRemaining: 0, tRemaining: 0 };
+    }
 }
