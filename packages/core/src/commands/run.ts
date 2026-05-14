@@ -5,6 +5,7 @@ import { program } from './program.js';
 import { SequentialBatcher } from '../batch/sequential-batcher.js';
 import { TimeBatchHandler } from '../batch/time-batch-handler.js';
 import { CountBatchHandler } from '../batch/count-batch-handler.js';
+import { SmartBatchHandler } from '../batch/smart-batch-handler.js';
 import { BatchMode, TestItem, TestRunConfig, TestRunContext } from '../types/adapters.js';
 import type { BatchHandler } from '../batch/batch-handler.js';
 import { SYMBOLS } from '../symbols.js';
@@ -62,6 +63,7 @@ function registerServices(container: Container) {
     container.bind<BatchHandler>(SYMBOLS.BatchHandler).to(SequentialBatcher).whenNamed(BatchMode.Off);
     container.bind<BatchHandler>(SYMBOLS.BatchHandler).to(CountBatchHandler).whenNamed(BatchMode.Count);
     container.bind<BatchHandler>(SYMBOLS.BatchHandler).to(TimeBatchHandler).whenNamed(BatchMode.Time);
+    container.bind<BatchHandler>(SYMBOLS.BatchHandler).to(SmartBatchHandler).whenNamed(BatchMode.Smart);
     container
         .bind<BatchHandlerFactory>(SYMBOLS.BatchHandlerFactory)
         .toFactory((ctx) => (mode: BatchMode): BatchHandler => {
