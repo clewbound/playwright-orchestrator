@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CountBatchHandler } from '../packages/core/src/batch/count-batch-handler.js';
 import { TimeBatchHandler } from '../packages/core/src/batch/time-batch-handler.js';
 import { BaseBatchHandler } from '../packages/core/src/batch/base-batch-handler.js';
+import { SmartBatchHandler } from '../packages/core/src/batch/smart-batch-handler.js';
 import type { ShardHandler } from '../packages/core/src/adapters/shard-handler.js';
 import type { TestItem, TestRunConfig } from '../packages/core/src/types/adapters.js';
 import { Grouping, BatchMode } from '../packages/core/src/types/adapters.js';
@@ -39,6 +40,7 @@ function makeMockShardHandler() {
         finishShard: vi.fn(),
         getNextTest: vi.fn(),
         getNextTestByProject: vi.fn(),
+        getRemainingCounters: vi.fn(),
     };
 }
 
@@ -196,5 +198,87 @@ describe('TimeBatchHandler.getNextBatch', () => {
 
         const result = await handler.getNextBatch(configTime(10));
         expect(result).toBeUndefined();
+    });
+});
+
+// ─── SmartBatchHandler ────────────────────────────────────────────────────────
+
+describe('SmartBatchHandler.getNextBatch', () => {
+    let handler: SmartBatchHandler;
+    let mock: ReturnType<typeof makeMockShardHandler>;
+
+    beforeEach(() => {
+        handler = new SmartBatchHandler();
+        mock = makeMockShardHandler();
+        injectShardHandler(handler, mock);
+    });
+
+    function configSmart(): TestRunConfig {
+        return makeConfig({ batchMode: BatchMode.Smart, grouping: Grouping.Test });
+    }
+
+    it('always takes at least one test even if counters start at 0', async () => {
+        mock.getNextTest.mockResolvedValueOnce(makeTest('a', 'chrome', 5000));
+        mock.getRemainingCounters.mockResolvedValue({ nRemaining: 0, tRemaining: 0 });
+
+        const result = await handler.getNextBatch(configSmart());
+        expect(result).toHaveLength(1);
+    });
+
+    it('stops at count cap ceil(sqrt(N))', async () => {
+        // N=4: cap=2. Each test ema=1000. budget=4000/sqrt(4)=2000.
+        // After test1 (accumulated=1000): 1000 < 2000 and 1 < 2 → take test2.
+        // After test2 (accumulated=2000): 2000 >= 2000 → stop.
+        mock.getRemainingCounters
+            .mockResolvedValueOnce({ nRemaining: 4, tRemaining: 4000 })
+            .mockResolvedValue({ nRemaining: 2, tRemaining: 2000 });
+        mock.getNextTest
+            .mockResolvedValueOnce(makeTest('a', 'chrome', 1000))
+            .mockResolvedValueOnce(makeTest('b', 'chrome', 1000));
+
+        const result = await handler.getNextBatch(configSmart());
+        expect(result!.map((t) => t.testId)).toEqual(['a', 'b']);
+    });
+
+    it('stops at duration budget T/sqrt(N)', async () => {
+        // N=4, T=8000: budget=4000, cap=2.
+        // After test1 (ema=3000): accumulated=3000 < 4000 → take test2.
+        // After test2 (ema=2000): accumulated=5000 >= 4000 → stop.
+        mock.getRemainingCounters
+            .mockResolvedValueOnce({ nRemaining: 4, tRemaining: 8000 })
+            .mockResolvedValue({ nRemaining: 2, tRemaining: 3000 });
+        mock.getNextTest
+            .mockResolvedValueOnce(makeTest('a', 'chrome', 3000))
+            .mockResolvedValueOnce(makeTest('b', 'chrome', 2000));
+
+        const result = await handler.getNextBatch(configSmart());
+        expect(result!.map((t) => t.testId)).toEqual(['a', 'b']);
+    });
+
+    it('returns undefined when queue is empty from the start', async () => {
+        mock.getNextTest.mockResolvedValueOnce(undefined);
+
+        const result = await handler.getNextBatch(configSmart());
+        expect(result).toBeUndefined();
+    });
+
+    it('stops when nRemaining reaches 0 mid-batch', async () => {
+        mock.getNextTest.mockResolvedValueOnce(makeTest('a', 'chrome', 5000));
+        mock.getRemainingCounters.mockResolvedValueOnce({ nRemaining: 0, tRemaining: 0 });
+
+        const result = await handler.getNextBatch(configSmart());
+        expect(result).toHaveLength(1);
+    });
+
+    it('uses project affinity: subsequent calls use first test project', async () => {
+        const config = makeConfig({ batchMode: BatchMode.Smart, grouping: Grouping.Project });
+        // nRemaining=4: cap=2, budget=40000/2=20000 > accumulated=5000 → tries for test2
+        mock.getRemainingCounters.mockResolvedValue({ nRemaining: 4, tRemaining: 40000 });
+        mock.getNextTest.mockResolvedValueOnce(makeTest('a', 'chrome', 5000));
+        mock.getNextTestByProject.mockResolvedValueOnce(undefined);
+
+        await handler.getNextBatch(config);
+        expect(mock.getNextTest).toHaveBeenCalledTimes(1);
+        expect(mock.getNextTestByProject).toHaveBeenCalledWith('chrome');
     });
 });
