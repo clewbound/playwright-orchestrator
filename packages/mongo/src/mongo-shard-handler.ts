@@ -42,6 +42,11 @@ export class MongoShardHandler implements ShardHandler {
             $set: { updated: new Date(), status: TestStatus.Ongoing },
         });
         if (!result) return undefined;
+        const effectiveEma = result.ema;
+        await this.runs.updateOne(
+            { _id: generateRunId(runId) },
+            { $inc: { 'config.remainingCount': -1, 'config.remainingTime': -effectiveEma } },
+        );
         const { file, line, column, projects, timeout, ema, children, testId } = result;
         const { order } = parseTestId(result._id);
         return { file, position: `${line}:${column}`, projects, timeout, ema, order, children, testId };
@@ -114,6 +119,13 @@ export class MongoShardHandler implements ShardHandler {
     }
 
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const run = await this.runs.findOne(
+            { _id: generateRunId(this.runContext.runId) },
+            { projection: { 'config.remainingCount': 1, 'config.remainingTime': 1 } },
+        );
+        return {
+            nRemaining: Math.max(0, (run?.config?.remainingCount as number) ?? 0),
+            tRemaining: Math.max(0, (run?.config?.remainingTime as number) ?? 0),
+        };
     }
 }
