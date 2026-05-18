@@ -69,6 +69,8 @@ export class PgTestRunCreator extends BaseTestRunCreator {
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN');
+            run.config.remainingCount = tests.length;
+            run.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
             await client.query({
                 text: `INSERT INTO ${this.configTable} (id, status, config, shards) VALUES ($1, $2, $3, '{}')`,
                 values: [runId, RunStatus.Created, JSON.stringify(run.config)],

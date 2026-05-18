@@ -55,9 +55,20 @@ export class PgShardHandler implements ShardHandler {
                 RETURNING *`,
                 values,
             });
-            await client.query('COMMIT');
-            if (result.rowCount === 0) return undefined;
+            if (result.rowCount === 0) {
+                await client.query('COMMIT');
+                return undefined;
+            }
             const { file, line, character, projects, timeout, ema, order_num, children, test_id } = result.rows[0];
+            await client.query({
+                text: `UPDATE ${this.configTable}
+                SET config = jsonb_set(jsonb_set(config,
+                    '{remainingCount}', (GREATEST(0, (config->>'remainingCount')::bigint - 1))::text::jsonb),
+                    '{remainingTime}', (GREATEST(0, (config->>'remainingTime')::float - $2))::text::jsonb)
+                WHERE id = $1`,
+                values: [runId, ema],
+            });
+            await client.query('COMMIT');
             return {
                 file,
                 position: `${line}:${character}`,
@@ -140,6 +151,16 @@ export class PgShardHandler implements ShardHandler {
     }
 
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const { runId } = this.runContext;
+        const result = await this.pool.query({
+            text: `SELECT config->>'remainingCount' AS remaining_count, config->>'remainingTime' AS remaining_time FROM ${this.configTable} WHERE id = $1`,
+            values: [runId],
+        });
+        if (result.rowCount === 0) return { nRemaining: 0, tRemaining: 0 };
+        const { remaining_count, remaining_time } = result.rows[0];
+        return {
+            nRemaining: Math.max(0, Number(remaining_count ?? 0)),
+            tRemaining: Math.max(0, Number(remaining_time ?? 0)),
+        };
     }
 }
