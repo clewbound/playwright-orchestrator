@@ -5,17 +5,17 @@ import { BaseBatchHandler } from './base-batch-handler.js';
 
 @injectable()
 @injectFromBase({ extendProperties: true, extendConstructorArguments: false })
-export class SmartBatchHandler extends BaseBatchHandler implements BatchHandler {
+export class AutoBatchHandler extends BaseBatchHandler implements BatchHandler {
     async getNextBatch(config: TestRunConfig): Promise<TestItem[] | undefined> {
         const batch: TestItem[] = [];
         let accumulated = 0;
 
         while (true) {
             if (batch.length > 0) {
-                const { nRemaining, tRemaining } = await this.getCounters(config);
-                if (nRemaining === 0) break;
-                const budget = tRemaining / Math.sqrt(nRemaining);
-                const cap = Math.ceil(Math.sqrt(nRemaining));
+                const { remainingCount, remainingTime } = await this.getCounters(config);
+                if (remainingCount === 0) break;
+                const budget = remainingTime / Math.sqrt(remainingCount);
+                const cap = Math.ceil(Math.sqrt(remainingCount));
                 if (accumulated >= budget || batch.length >= cap) break;
             }
 

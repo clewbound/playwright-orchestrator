@@ -63,8 +63,8 @@ export class PgShardHandler implements ShardHandler {
             await client.query({
                 text: `UPDATE ${this.configTable}
                 SET config = jsonb_set(jsonb_set(config,
-                    '{remainingCount}', (GREATEST(0, (config->>'remainingCount')::bigint - 1))::text::jsonb),
-                    '{remainingTime}', (GREATEST(0, (config->>'remainingTime')::float - $2))::text::jsonb)
+                    '{remainingCount}', ((config->>'remainingCount')::bigint - 1)::text::jsonb),
+                    '{remainingTime}', ((config->>'remainingTime')::float - $2)::text::jsonb)
                 WHERE id = $1`,
                 values: [runId, ema],
             });
@@ -117,6 +117,16 @@ export class PgShardHandler implements ShardHandler {
                     WHERE id = $1;`,
                     values: [runId, RunStatus.Created],
                 });
+                if (statusBefore === RunStatus.Finished) {
+                    await client.query({
+                        text: `UPDATE ${this.configTable}
+                        SET config = jsonb_set(jsonb_set(config,
+                            '{remainingCount}', (SELECT COUNT(*) FROM ${this.testsTable} WHERE run_id = $1 AND status = ${TestStatus.Ready})::text::jsonb),
+                            '{remainingTime}', (SELECT COALESCE(SUM(ema), 0) FROM ${this.testsTable} WHERE run_id = $1 AND status = ${TestStatus.Ready})::text::jsonb)
+                        WHERE id = $1`,
+                        values: [runId],
+                    });
+                }
             }
             await client.query({
                 text: `UPDATE ${this.configTable}
@@ -150,17 +160,17 @@ export class PgShardHandler implements ShardHandler {
         );
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const { runId } = this.runContext;
         const result = await this.pool.query({
             text: `SELECT config->>'remainingCount' AS remaining_count, config->>'remainingTime' AS remaining_time FROM ${this.configTable} WHERE id = $1`,
             values: [runId],
         });
-        if (result.rowCount === 0) return { nRemaining: 0, tRemaining: 0 };
+        if (result.rowCount === 0) return { remainingCount: 0, remainingTime: 0 };
         const { remaining_count, remaining_time } = result.rows[0];
         return {
-            nRemaining: Math.max(0, Number(remaining_count ?? 0)),
-            tRemaining: Math.max(0, Number(remaining_time ?? 0)),
+            remainingCount: Math.max(0, Number(remaining_count ?? 0)),
+            remainingTime: Math.max(0, Number(remaining_time ?? 0)),
         };
     }
 }

@@ -79,6 +79,18 @@ export class MongoShardHandler implements ShardHandler {
             await this.tests.updateMany(this.generateTestIdQuery(runId, TestStatus.Failed), {
                 $set: { status: TestStatus.Ready, updated: now },
             });
+            if (statusBefore === RunStatus.Finished) {
+                const [agg] = await this.tests
+                    .aggregate<{ count: number; totalEma: number }>([
+                        { $match: this.generateTestIdQuery(runId, TestStatus.Ready) },
+                        { $group: { _id: null, count: { $sum: 1 }, totalEma: { $sum: '$ema' } } },
+                    ])
+                    .toArray();
+                await this.runs.updateOne(
+                    { _id: generateRunId(runId) },
+                    { $set: { 'config.remainingCount': agg?.count ?? 0, 'config.remainingTime': agg?.totalEma ?? 0 } },
+                );
+            }
         }
         return run.config;
     }
@@ -118,14 +130,14 @@ export class MongoShardHandler implements ShardHandler {
         };
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const run = await this.runs.findOne(
             { _id: generateRunId(this.runContext.runId) },
             { projection: { 'config.remainingCount': 1, 'config.remainingTime': 1 } },
         );
         return {
-            nRemaining: Math.max(0, (run?.config?.remainingCount as number) ?? 0),
-            tRemaining: Math.max(0, (run?.config?.remainingTime as number) ?? 0),
+            remainingCount: Math.max(0, (run?.config?.remainingCount as number) ?? 0),
+            remainingTime: Math.max(0, (run?.config?.remainingTime as number) ?? 0),
         };
     }
 }

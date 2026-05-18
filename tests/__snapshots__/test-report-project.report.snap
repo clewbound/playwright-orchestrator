@@ -78,7 +78,9 @@
           }
         }
       }
-    ]
+    ],
+    "remainingCount": 0,
+    "remainingTime": 0
   },
   "tests": [
     {

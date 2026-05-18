@@ -84,27 +84,44 @@ return nil`;
         if (!dbStatus) throw new Error(`Run ${runId} not found`);
         const status = +dbStatus as RunStatus;
 
-        if (status === RunStatus.Created || status === RunStatus.Finished) {
-            const transaction = client.multi();
-            if (status === RunStatus.Finished) {
-                const queueKey = `${this._namePrefix}:${TESTS}:${runId}`;
-                const script = `
-                    local items = redis.call('LRANGE', KEYS[1], 0, -1)
-                    redis.call('DEL', KEYS[1])
-                    return items
-                    `;
-                const res = ((await client.eval(script, { keys: [`${queueKey}:failed`] })) ?? []) as string[];
-                const elements = res.map((el: string) => JSON.parse(el));
-                elements.sort((a, b) => a.order - b.order);
-                for (const el of elements) {
-                    transaction.rPush(`${queueKey}:queue`, JSON.stringify(el));
-                }
-            }
-            transaction.set(statusKey, status === RunStatus.Created ? RunStatus.Run : RunStatus.RepeatRun, {
-                EX: this.ttl,
+        if (status === RunStatus.Finished) {
+            const queueKey = `${this._namePrefix}:${TESTS}:${runId}`;
+            // Atomic CAS: only the shard that wins the Finished→RepeatRun transition
+            // moves the failed list and resets the counter keys. No cjson re-encode of
+            // the config JSON — counters are stored as plain string keys to avoid the
+            // cjson empty-array→object corruption bug.
+            const script = `
+local current = redis.call('GET', KEYS[1])
+if current ~= ARGV[1] then return 0 end
+local items = redis.call('LRANGE', KEYS[2], 0, -1)
+redis.call('DEL', KEYS[2])
+for i = 1, #items do redis.call('RPUSH', KEYS[3], items[i]) end
+local totalEma = 0
+for i = 1, #items do
+    local item = cjson.decode(items[i])
+    totalEma = totalEma + (item.ema or 0)
+end
+local ttl = tonumber(ARGV[4])
+redis.call('SET', KEYS[4], tostring(#items), 'EX', ttl)
+redis.call('SET', KEYS[5], tostring(totalEma), 'EX', ttl)
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ttl)
+redis.call('SET', KEYS[6], ARGV[3], 'EX', ttl)
+return 1`;
+            await client.eval(script, {
+                keys: [statusKey, `${queueKey}:failed`, `${queueKey}:queue`, `${key}:remainingCount`, `${key}:remainingTime`, updatedKey],
+                arguments: [
+                    String(RunStatus.Finished),
+                    String(RunStatus.RepeatRun),
+                    String(new Date().getTime()),
+                    String(this.ttl),
+                ],
             });
-            transaction.set(updatedKey, new Date().getTime(), { EX: this.ttl });
-            await transaction.exec();
+        } else if (status === RunStatus.Created) {
+            await client
+                .multi()
+                .set(statusKey, RunStatus.Run, { EX: this.ttl })
+                .set(updatedKey, new Date().getTime(), { EX: this.ttl })
+                .exec();
         }
         if (!existingShard) {
             await client
@@ -141,28 +158,29 @@ return nil`;
         return JSON.parse(config);
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const { runId } = this.runContext;
         const client = await this.connection.getClient();
-        const configKey = `${this._namePrefix}:${TEST_RUN}:${runId}:config`;
-        const raw = await client.get(configKey);
-        if (!raw) return { nRemaining: 0, tRemaining: 0 };
-        const config = JSON.parse(raw) as TestRunConfig;
+        const key = `${this._namePrefix}:${TEST_RUN}:${runId}`;
+        const [count, time] = (await client
+            .multi()
+            .get(`${key}:remainingCount`)
+            .get(`${key}:remainingTime`)
+            .exec()) as [string | null, string | null];
         return {
-            nRemaining: Math.max(0, config.remainingCount ?? 0),
-            tRemaining: Math.max(0, config.remainingTime ?? 0),
+            remainingCount: Math.max(0, Number(count ?? 0)),
+            remainingTime: Math.max(0, Number(time ?? 0)),
         };
     }
 
     private async decrementCounters(ema: number): Promise<void> {
         const { runId } = this.runContext;
         const client = await this.connection.getClient();
-        const configKey = `${this._namePrefix}:${TEST_RUN}:${runId}:config`;
-        const raw = await client.get(configKey);
-        if (!raw) return;
-        const config = JSON.parse(raw) as TestRunConfig;
-        config.remainingCount = Math.max(0, (config.remainingCount ?? 1) - 1);
-        config.remainingTime = Math.max(0, (config.remainingTime ?? 0) - ema);
-        await client.set(configKey, JSON.stringify(config), { EX: this.ttl });
+        const key = `${this._namePrefix}:${TEST_RUN}:${runId}`;
+        await client
+            .multi()
+            .incrBy(`${key}:remainingCount`, -1)
+            .incrByFloat(`${key}:remainingTime`, -ema)
+            .exec();
     }
 }

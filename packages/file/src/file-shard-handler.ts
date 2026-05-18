@@ -108,18 +108,28 @@ export class FileShardHandler implements ShardHandler {
 
     private async decrementCounters(runId: string, ema: number): Promise<void> {
         const configFile = getRunConfigPath(this.dir, runId);
-        const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
-        testRun.config.remainingCount = Math.max(0, (testRun.config.remainingCount ?? 1) - 1);
-        testRun.config.remainingTime = Math.max(0, (testRun.config.remainingTime ?? 0) - ema);
-        await writeFile(configFile, JSON.stringify(testRun, null, 2));
+        const release = await lock(configFile, { retries: 100 });
+        try {
+            const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
+            testRun.config.remainingCount = (testRun.config.remainingCount ?? 1) - 1;
+            testRun.config.remainingTime = (testRun.config.remainingTime ?? 0) - ema;
+            await writeFile(configFile, JSON.stringify(testRun, null, 2));
+        } finally {
+            await release();
+        }
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const configFile = getRunConfigPath(this.dir, this.runContext.runId);
-        const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
-        return {
-            nRemaining: Math.max(0, testRun.config.remainingCount ?? 0),
-            tRemaining: Math.max(0, testRun.config.remainingTime ?? 0),
-        };
+        const release = await lock(configFile, { retries: 100 });
+        try {
+            const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
+            return {
+                remainingCount: Math.max(0, testRun.config.remainingCount ?? 0),
+                remainingTime: Math.max(0, testRun.config.remainingTime ?? 0),
+            };
+        } finally {
+            await release();
+        }
     }
 }

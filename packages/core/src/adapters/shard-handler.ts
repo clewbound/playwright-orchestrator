@@ -5,5 +5,5 @@ export interface ShardHandler {
     finishShard(): Promise<void>;
     getNextTest(config: TestRunConfig): Promise<TestItem | undefined>;
     getNextTestByProject(project: string): Promise<TestItem | undefined>;
-    getRemainingCounters(config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }>;
+    getRemainingCounters(config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }>;
 }

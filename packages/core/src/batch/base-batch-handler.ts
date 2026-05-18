@@ -14,7 +14,7 @@ export class BaseBatchHandler {
         return await this.shardHandler.getNextTestByProject(project);
     }
 
-    protected async getCounters(config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    protected async getCounters(config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         return this.shardHandler.getRemainingCounters(config);
     }
 }

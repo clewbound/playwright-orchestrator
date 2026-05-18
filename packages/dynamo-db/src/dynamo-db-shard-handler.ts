@@ -12,6 +12,7 @@ import {
     UpdateCommand,
     QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { mapDbToTestItem, mapTestItemToDb, getTtl, mapDbToTestRun } from './helpers.js';
 import { Fields, OFFSET_STEP, StatusOffset } from './constants.js';
 import type { TestItemDb, TestRunDb } from './types.js';
@@ -39,8 +40,26 @@ export class DynamoDbShardHandler implements ShardHandler {
 
         let status = testRun.status;
         if (status === RunStatus.Created || status === RunStatus.Finished) {
-            status = status === RunStatus.Finished ? RunStatus.RepeatRun : RunStatus.Run;
-            await this.updateFailedTests(runId, testRun.config);
+            const isRepeat = status === RunStatus.Finished;
+            const nextStatus = isRepeat ? RunStatus.RepeatRun : RunStatus.Run;
+            const won = await this.tryTransitionStatus(runId, status, nextStatus);
+            if (won && isRepeat) {
+                const { count, totalEma } = await this.updateFailedTests(runId);
+                await this.connection.docClient.send(
+                    new UpdateCommand({
+                        TableName: this.testsTableName,
+                        Key: { [Fields.Id]: runId, [Fields.Order]: 0 },
+                        UpdateExpression: 'SET #cfg.#rc = :rc, #cfg.#rt = :rt',
+                        ExpressionAttributeNames: {
+                            '#cfg': Fields.Config,
+                            '#rc': 'remainingCount',
+                            '#rt': 'remainingTime',
+                        },
+                        ExpressionAttributeValues: { ':rc': count, ':rt': totalEma },
+                    }),
+                );
+            }
+            status = nextStatus;
         }
         await this.updateTestRun(
             status,
@@ -108,6 +127,25 @@ export class DynamoDbShardHandler implements ShardHandler {
         );
     }
 
+    private async tryTransitionStatus(runId: string, from: RunStatus, to: RunStatus): Promise<boolean> {
+        try {
+            await this.connection.docClient.send(
+                new UpdateCommand({
+                    TableName: this.testsTableName,
+                    Key: { [Fields.Id]: runId, [Fields.Order]: 0 },
+                    UpdateExpression: 'SET #status = :to, #updated = :updated',
+                    ConditionExpression: '#status = :from',
+                    ExpressionAttributeNames: { '#status': Fields.Status, '#updated': Fields.Updated },
+                    ExpressionAttributeValues: { ':from': from, ':to': to, ':updated': Date.now() },
+                }),
+            );
+            return true;
+        } catch (e) {
+            if (e instanceof ConditionalCheckFailedException) return false;
+            throw e;
+        }
+    }
+
     private async getNextTestByStatus(
         runId: string,
         status: StatusOffset,
@@ -125,13 +163,15 @@ export class DynamoDbShardHandler implements ShardHandler {
                 new UpdateCommand({
                     TableName: this.testsTableName,
                     Key: { [Fields.Id]: runId, [Fields.Order]: 0 },
-                    UpdateExpression: 'ADD #cfg.#rc :rc, #cfg.#rt :rt',
+                    UpdateExpression:
+                        'SET #cfg.#rc = if_not_exists(#cfg.#rc, :zero) + :rc, #cfg.#rt = if_not_exists(#cfg.#rt, :zero) + :rt',
                     ExpressionAttributeNames: {
                         '#cfg': Fields.Config,
                         '#rc': 'remainingCount',
                         '#rt': 'remainingTime',
                     },
                     ExpressionAttributeValues: {
+                        ':zero': 0,
                         ':rc': -1,
                         ':rt': -test!.ema,
                     },
@@ -141,12 +181,17 @@ export class DynamoDbShardHandler implements ShardHandler {
         return test;
     }
 
-    private async updateFailedTests(runId: string, config: TestRunConfig): Promise<void> {
+    private async updateFailedTests(runId: string): Promise<{ count: number; totalEma: number }> {
+        let count = 0;
+        let totalEma = 0;
         let test = await this.getNextTestByStatus(runId, StatusOffset.Failed);
         while (test) {
             await this.addPendingTestItem(runId, test);
+            count++;
+            totalEma += test.ema;
             test = await this.getNextTestByStatus(runId, StatusOffset.Failed);
         }
+        return { count, totalEma };
     }
 
     private async addPendingTestItem(runId: string, test: TestItem): Promise<void> {
@@ -235,12 +280,12 @@ export class DynamoDbShardHandler implements ShardHandler {
         }
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const run = await this.getTestRun(this.runContext.runId);
         const cfg = run[Fields.Config];
         return {
-            nRemaining: Math.max(0, cfg?.remainingCount ?? 0),
-            tRemaining: Math.max(0, cfg?.remainingTime ?? 0),
+            remainingCount: Math.max(0, cfg?.remainingCount ?? 0),
+            remainingTime: Math.max(0, cfg?.remainingTime ?? 0),
         };
     }
 }

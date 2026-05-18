@@ -71,10 +71,10 @@ export class MySQLShardHandler implements ShardHandler {
                 UPDATE ??
                 SET config = JSON_SET(
                     config,
-                    '$.remainingCount', GREATEST(0, COALESCE(config->>'$.remainingCount', 1) - IF(@order_num IS NOT NULL, 1, 0)),
-                    '$.remainingTime', GREATEST(0, COALESCE(config->>'$.remainingTime', 0) - COALESCE(
+                    '$.remainingCount', COALESCE(config->>'$.remainingCount', 1) - IF(@order_num IS NOT NULL, 1, 0),
+                    '$.remainingTime', COALESCE(config->>'$.remainingTime', 0) - COALESCE(
                         (SELECT ema FROM ?? WHERE run_id = UUID_TO_BIN(?) AND order_num = @order_num LIMIT 1), 0
-                    ))
+                    )
                 )
                 WHERE id = UUID_TO_BIN(?);
                 SELECT * FROM ??
@@ -139,6 +139,20 @@ export class MySQLShardHandler implements ShardHandler {
                     sql: `UPDATE ?? SET updated = CURRENT_TIMESTAMP, status = CASE WHEN status = ? THEN ? ELSE ? END WHERE id = UUID_TO_BIN(?)`,
                     values: [this.configTable, RunStatus.Created, RunStatus.Run, RunStatus.RepeatRun, runId],
                 });
+                if (statusBefore === RunStatus.Finished) {
+                    await client.query({
+                        sql: `UPDATE ?? SET config = JSON_SET(config,
+                            '$.remainingCount', (SELECT COUNT(*) FROM ?? WHERE run_id = UUID_TO_BIN(?) AND status = ?),
+                            '$.remainingTime', (SELECT COALESCE(SUM(ema), 0) FROM ?? WHERE run_id = UUID_TO_BIN(?) AND status = ?)
+                        ) WHERE id = UUID_TO_BIN(?)`,
+                        values: [
+                            this.configTable,
+                            this.testsTable, runId, TestStatus.Ready,
+                            this.testsTable, runId, TestStatus.Ready,
+                            runId,
+                        ],
+                    });
+                }
             }
             await client.query({
                 sql: `UPDATE ??
@@ -171,16 +185,16 @@ export class MySQLShardHandler implements ShardHandler {
         );
     }
 
-    async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
+    async getRemainingCounters(_config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
         const { runId } = this.runContext;
         const [rows] = await this.pool.query<Run[]>({
             sql: `SELECT config FROM ?? WHERE id = UUID_TO_BIN(?)`,
             values: [this.configTable, runId],
         });
-        if (!rows.length) return { nRemaining: 0, tRemaining: 0 };
+        if (!rows.length) return { remainingCount: 0, remainingTime: 0 };
         return {
-            nRemaining: Math.max(0, rows[0].config.remainingCount ?? 0),
-            tRemaining: Math.max(0, rows[0].config.remainingTime ?? 0),
+            remainingCount: Math.max(0, rows[0].config.remainingCount ?? 0),
+            remainingTime: Math.max(0, rows[0].config.remainingTime ?? 0),
         };
     }
 }
