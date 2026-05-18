@@ -28,7 +28,10 @@ export class RedisShardHandler implements ShardHandler {
         const { runId } = this.runContext;
         const client = await this.connection.getClient();
         const res = await client.lPop(`${this._namePrefix}:${TESTS}:${runId}:queue:${project}`);
-        return res ? JSON.parse(res) : undefined;
+        if (!res) return undefined;
+        const test: TestItem = JSON.parse(res);
+        await this.decrementCounters(test.ema);
+        return test;
     }
 
     async getNextTest(config: TestRunConfig): Promise<TestItem | undefined> {
@@ -61,7 +64,10 @@ return nil`;
             keys: [primaryKey],
             arguments: config.projects.map((project) => `${primaryKey}:${project.name}`),
         })) as string | null;
-        return res ? JSON.parse(res) : undefined;
+        if (!res) return undefined;
+        const test: TestItem = JSON.parse(res);
+        await this.decrementCounters(test.ema);
+        return test;
     }
 
     async startShard(): Promise<TestRunConfig> {
@@ -136,6 +142,27 @@ return nil`;
     }
 
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const { runId } = this.runContext;
+        const client = await this.connection.getClient();
+        const configKey = `${this._namePrefix}:${TEST_RUN}:${runId}:config`;
+        const raw = await client.get(configKey);
+        if (!raw) return { nRemaining: 0, tRemaining: 0 };
+        const config = JSON.parse(raw) as TestRunConfig;
+        return {
+            nRemaining: Math.max(0, config.remainingCount ?? 0),
+            tRemaining: Math.max(0, config.remainingTime ?? 0),
+        };
+    }
+
+    private async decrementCounters(ema: number): Promise<void> {
+        const { runId } = this.runContext;
+        const client = await this.connection.getClient();
+        const configKey = `${this._namePrefix}:${TEST_RUN}:${runId}:config`;
+        const raw = await client.get(configKey);
+        if (!raw) return;
+        const config = JSON.parse(raw) as TestRunConfig;
+        config.remainingCount = Math.max(0, (config.remainingCount ?? 1) - 1);
+        config.remainingTime = Math.max(0, (config.remainingTime ?? 0) - ema);
+        await client.set(configKey, JSON.stringify(config), { EX: this.ttl });
     }
 }

@@ -58,6 +58,8 @@ export class RedisTestRunCreator extends BaseTestRunCreator {
         const client = await this.connection.getClient();
         const baseTestRunKey = `${this._namePrefix}:${TEST_RUN}:${runId}`;
         const setOptions: SetOptions = { EX: this.ttl };
+        testRun.config.remainingCount = tests.length;
+        testRun.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
         const pipeline = client
             .multi()
             .set(`${baseTestRunKey}:config`, JSON.stringify(testRun.config), setOptions)
