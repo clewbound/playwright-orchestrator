@@ -120,6 +120,24 @@ export class DynamoDbShardHandler implements ShardHandler {
             if (!test) return;
             deleted = await this.tryToDeleteItem(runId, test.order);
         }
+        if (status === StatusOffset.Pending) {
+            await this.connection.docClient.send(
+                new UpdateCommand({
+                    TableName: this.testsTableName,
+                    Key: { [Fields.Id]: runId, [Fields.Order]: 0 },
+                    UpdateExpression: 'ADD #cfg.#rc :rc, #cfg.#rt :rt',
+                    ExpressionAttributeNames: {
+                        '#cfg': Fields.Config,
+                        '#rc': 'remainingCount',
+                        '#rt': 'remainingTime',
+                    },
+                    ExpressionAttributeValues: {
+                        ':rc': -1,
+                        ':rt': -test!.ema,
+                    },
+                }),
+            );
+        }
         return test;
     }
 
@@ -218,6 +236,11 @@ export class DynamoDbShardHandler implements ShardHandler {
     }
 
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const run = await this.getTestRun(this.runContext.runId);
+        const cfg = run[Fields.Config];
+        return {
+            nRemaining: Math.max(0, cfg?.remainingCount ?? 0),
+            tRemaining: Math.max(0, cfg?.remainingTime ?? 0),
+        };
     }
 }

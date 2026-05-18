@@ -42,6 +42,8 @@ export class DynamoDbTestRunCreator extends BaseTestRunCreator {
     }
 
     async saveRunData(runId: string, testRun: TestRun, tests: TestItem[]): Promise<void> {
+        testRun.config.remainingCount = tests.length;
+        testRun.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
         await this.connection.docClient.send(
             new PutCommand({
                 TableName: this.testsTableName,
