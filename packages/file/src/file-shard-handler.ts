@@ -52,6 +52,8 @@ export class FileShardHandler implements ShardHandler {
                     const rest = results.filter((r) => r.status !== TestStatus.Failed);
                     await writeFile(getRunIdFilePath(this.dir, runId), JSON.stringify(failed, null, 2), 'utf-8');
                     await writeFile(getResultsRunPath(this.dir, runId), JSON.stringify(rest, null, 2), 'utf-8');
+                    testRun.config.remainingCount = failed.length;
+                    testRun.config.remainingTime = failed.reduce((sum, t) => sum + t.ema, 0);
                 }
             }
             await writeFile(file, JSON.stringify(testRun));
@@ -97,13 +99,27 @@ export class FileShardHandler implements ShardHandler {
             if (index === -1) return undefined;
             const [test] = tests.splice(index, 1);
             await writeFile(file, JSON.stringify(tests, null, 2));
+            await this.decrementCounters(runId, test.ema);
             return test;
         } finally {
             await release();
         }
     }
 
+    private async decrementCounters(runId: string, ema: number): Promise<void> {
+        const configFile = getRunConfigPath(this.dir, runId);
+        const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
+        testRun.config.remainingCount = Math.max(0, (testRun.config.remainingCount ?? 1) - 1);
+        testRun.config.remainingTime = Math.max(0, (testRun.config.remainingTime ?? 0) - ema);
+        await writeFile(configFile, JSON.stringify(testRun, null, 2));
+    }
+
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const configFile = getRunConfigPath(this.dir, this.runContext.runId);
+        const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
+        return {
+            nRemaining: Math.max(0, testRun.config.remainingCount ?? 0),
+            tRemaining: Math.max(0, testRun.config.remainingTime ?? 0),
+        };
     }
 }

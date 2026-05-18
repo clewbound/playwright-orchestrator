@@ -20,6 +20,8 @@ export interface TestRunConfig extends TestConfig {
     args: string[];
     options: BaseOptions;
     version?: string;
+    remainingCount?: number;
+    remainingTime?: number;
 }
 
 export interface TestShard {

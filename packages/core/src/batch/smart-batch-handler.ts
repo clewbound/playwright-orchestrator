@@ -23,7 +23,7 @@ export class SmartBatchHandler extends BaseBatchHandler implements BatchHandler 
             if (!test) break;
 
             batch.push(test);
-            accumulated += test.ema > 0 ? test.ema : test.timeout;
+            accumulated += test.ema;
         }
 
         return batch.length > 0 ? batch : undefined;
