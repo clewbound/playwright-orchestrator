@@ -226,12 +226,13 @@ describe('SmartBatchHandler.getNextBatch', () => {
     });
 
     it('stops at count cap ceil(sqrt(N))', async () => {
-        // N=4: cap=2. Each test ema=1000. budget=4000/sqrt(4)=2000.
+        // N=4: cap=2, budget=4000/sqrt(4)=2000.
         // After test1 (accumulated=1000): 1000 < 2000 and 1 < 2 → take test2.
-        // After test2 (accumulated=2000): 2000 >= 2000 → stop.
+        // N=2: cap=ceil(sqrt(2))=2, budget=40000/sqrt(2)≈28284.
+        // After test2 (accumulated=2000): batch.length=2 >= cap=2 → stop by cap (budget not reached).
         mock.getRemainingCounters
             .mockResolvedValueOnce({ nRemaining: 4, tRemaining: 4000 })
-            .mockResolvedValue({ nRemaining: 2, tRemaining: 2000 });
+            .mockResolvedValue({ nRemaining: 2, tRemaining: 40000 });
         mock.getNextTest
             .mockResolvedValueOnce(makeTest('a', 'chrome', 1000))
             .mockResolvedValueOnce(makeTest('b', 'chrome', 1000));
