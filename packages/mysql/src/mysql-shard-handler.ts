@@ -68,6 +68,15 @@ export class MySQLShardHandler implements ShardHandler {
                 UPDATE ??
                 SET status = ?, updated = CURRENT_TIMESTAMP
                 WHERE run_id = UUID_TO_BIN(?) AND order_num = @order_num;
+                UPDATE ??
+                SET config = JSON_SET(
+                    config,
+                    '$.remainingCount', GREATEST(0, COALESCE(config->>'$.remainingCount', 1) - IF(@order_num IS NOT NULL, 1, 0)),
+                    '$.remainingTime', GREATEST(0, COALESCE(config->>'$.remainingTime', 0) - COALESCE(
+                        (SELECT ema FROM ?? WHERE run_id = UUID_TO_BIN(?) AND order_num = @order_num LIMIT 1), 0
+                    ))
+                )
+                WHERE id = UUID_TO_BIN(?);
                 SELECT * FROM ??
                 WHERE run_id = UUID_TO_BIN(?) AND order_num = @order_num`,
                 [
@@ -78,13 +87,17 @@ export class MySQLShardHandler implements ShardHandler {
                     this.testsTable,
                     TestStatus.Ongoing,
                     runId,
+                    this.configTable,
+                    this.testsTable,
+                    runId,
+                    runId,
                     this.testsTable,
                     runId,
                 ],
             );
             await client.commit();
-            if (result[2].length === 0) return undefined;
-            const { file, line, pos, projects, timeout, ema, order_num, children, test_id } = result[2][0];
+            if (result[3].length === 0) return undefined;
+            const { file, line, pos, projects, timeout, ema, order_num, children, test_id } = result[3][0];
             return {
                 file,
                 position: `${line}:${pos}`,
@@ -159,6 +172,15 @@ export class MySQLShardHandler implements ShardHandler {
     }
 
     async getRemainingCounters(_config: TestRunConfig): Promise<{ nRemaining: number; tRemaining: number }> {
-        return { nRemaining: 0, tRemaining: 0 };
+        const { runId } = this.runContext;
+        const [rows] = await this.pool.query<Run[]>({
+            sql: `SELECT config FROM ?? WHERE id = UUID_TO_BIN(?)`,
+            values: [this.configTable, runId],
+        });
+        if (!rows.length) return { nRemaining: 0, tRemaining: 0 };
+        return {
+            nRemaining: Math.max(0, rows[0].config.remainingCount ?? 0),
+            tRemaining: Math.max(0, rows[0].config.remainingTime ?? 0),
+        };
     }
 }

@@ -83,6 +83,8 @@ export class MySQLTestRunCreator extends BaseTestRunCreator {
     }
 
     async saveRunData(runId: string, testRun: TestRun, tests: TestItem[]): Promise<void> {
+        testRun.config.remainingCount = tests.length;
+        testRun.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
         const testValues = tests.map(({ position, order, file, projects, timeout, ema, children, testId }) => {
             const [line, character] = position.split(':');
             return [
