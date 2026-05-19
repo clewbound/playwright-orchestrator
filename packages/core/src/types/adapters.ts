@@ -6,6 +6,7 @@ export const BatchMode = {
     Off: 'off',
     Time: 'time',
     Count: 'count',
+    Auto: 'auto',
 } as const;
 export type BatchMode = (typeof BatchMode)[keyof typeof BatchMode];
 
@@ -19,6 +20,8 @@ export interface TestRunConfig extends TestConfig {
     args: string[];
     options: BaseOptions;
     version?: string;
+    remainingCount?: number;
+    remainingTime?: number;
 }
 
 export interface TestShard {

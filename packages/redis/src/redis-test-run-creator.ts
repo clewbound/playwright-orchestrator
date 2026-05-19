@@ -58,11 +58,17 @@ export class RedisTestRunCreator extends BaseTestRunCreator {
         const client = await this.connection.getClient();
         const baseTestRunKey = `${this._namePrefix}:${TEST_RUN}:${runId}`;
         const setOptions: SetOptions = { EX: this.ttl };
+        const remainingCount = tests.length;
+        const remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
+        testRun.config.remainingCount = 0;
+        testRun.config.remainingTime = 0;
         const pipeline = client
             .multi()
             .set(`${baseTestRunKey}:config`, JSON.stringify(testRun.config), setOptions)
             .set(`${baseTestRunKey}:status`, RunStatus.Created, setOptions)
-            .set(`${baseTestRunKey}:updated`, testRun.updated, setOptions);
+            .set(`${baseTestRunKey}:updated`, testRun.updated, setOptions)
+            .set(`${baseTestRunKey}:remainingCount`, remainingCount, setOptions)
+            .set(`${baseTestRunKey}:remainingTime`, remainingTime, setOptions);
         const groupByProject = testRun.config.options.grouping === Grouping.Project;
         for (const test of tests) {
             const key = `${this._namePrefix}:${TESTS}:${runId}:queue${groupByProject && test.projects.length === 1 ? `:${test.projects[0]}` : ''}`;

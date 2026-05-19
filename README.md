@@ -165,7 +165,9 @@ Playwright's `--shard` pre-assigns tests before execution. Playwright Orchestrat
 
 Batching groups multiple tests into a single Playwright process invocation. This reduces per-test overhead and is most effective when individual tests are short and launch time dominates runtime.
 
-**`--batch-mode off` (default):** Each test runs in its own process. Safe for all workloads.
+**`--batch-mode auto` (default):** Dynamically sizes batches based on remaining work. Uses EMA-estimated total remaining time and test count to compute a duration budget (`T_remaining / √N_remaining`) and a count cap (`⌈√N_remaining⌉`) — whichever is hit first ends the batch. No configuration required.
+
+**`--batch-mode off`:** Each test runs in its own process. Safe for all workloads.
 
 **`--batch-mode time`:** Groups tests until their predicted total duration approximately reaches `--batch-target` seconds. Produces batches of roughly equal wall-clock length — best for even distribution across shards.
 
@@ -188,12 +190,12 @@ No additional options.
 
 Creates and configures a new test run. Outputs created run ID. Supports most of [playwright's options](https://playwright.dev/docs/test-cli#reference).
 
-| Option             | Description                                                                                                                          | Type                   | Default | Required?                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ------- | ------------------------------------ |
-| `--history-window` | Count of runs history kept and window for average duration. More [here](#how-it-works)                                               | `number`               | `10`    | no                                   |
-| `--batch-mode`     | Batch grouping mode. `off` uses current single-test behaviour                                                                        | `off \| time \| count` | `off`   | no                                   |
-| `--batch-target`   | Batch size: seconds (time mode) or test count (count mode)                                                                           | `number`               | -       | yes when `--batch-mode` is not `off` |
-| `--grouping`       | How tests are grouped. Experiment on your workload, but per project query is less optimized, using default behaviour is recommended. | `test \| project`      | `test`  | no                                   |
+| Option             | Description                                                                                                                          | Type                           | Default | Required?                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | ------- | -------------------------------------------- |
+| `--history-window` | Count of runs history kept and window for average duration. More [here](#how-it-works)                                               | `number`                       | `10`    | no                                           |
+| `--batch-mode`     | Batch grouping mode. `off` runs each test in its own process                                                                         | `auto \| off \| time \| count` | `auto`  | no                                           |
+| `--batch-target`   | Batch size: seconds (time mode) or test count (count mode)                                                                           | `number`                       | -       | yes when `--batch-mode` is `time` or `count` |
+| `--grouping`       | How tests are grouped. Experiment on your workload, but per project query is less optimized, using default behaviour is recommended. | `test \| project`              | `test`  | no                                           |
 
 ### `run`
 

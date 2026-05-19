@@ -53,6 +53,8 @@ export class MongoTestRunCreator extends BaseTestRunCreator {
 
     async saveRunData(runId: string, testRun: TestRun, tests: TestItem[]): Promise<void> {
         const now = new Date();
+        testRun.config.remainingCount = tests.length;
+        testRun.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
         const run: TestRunDocument = {
             _id: generateRunId(runId),
             ...testRun,

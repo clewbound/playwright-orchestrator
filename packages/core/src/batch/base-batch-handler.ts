@@ -13,4 +13,8 @@ export class BaseBatchHandler {
         if (config.options.grouping === Grouping.Test || !project) return await this.shardHandler.getNextTest(config);
         return await this.shardHandler.getNextTestByProject(project);
     }
+
+    protected async getCounters(config: TestRunConfig): Promise<{ remainingCount: number; remainingTime: number }> {
+        return this.shardHandler.getRemainingCounters(config);
+    }
 }

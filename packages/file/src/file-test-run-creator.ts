@@ -46,6 +46,8 @@ export class FileTestRunCreator extends BaseTestRunCreator {
     }
 
     async saveRunData(runId: string, testRun: TestRun, tests: TestItem[]): Promise<void> {
+        testRun.config.remainingCount = tests.length;
+        testRun.config.remainingTime = tests.reduce((sum, t) => sum + t.ema, 0);
         await writeFile(getRunConfigPath(this.dir, runId), JSON.stringify(testRun, null, 2));
         await writeFile(getRunIdFilePath(this.dir, runId), JSON.stringify(tests, null, 2));
         await writeFile(getResultsRunPath(this.dir, runId), '[]');

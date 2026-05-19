@@ -19,8 +19,8 @@ export default async () => {
             .option('--history-window <number>', 'History window size', '10')
             .addOption(
                 new Option('--batch-mode <mode>', 'Batch grouping mode')
-                    .choices([BatchMode.Off, BatchMode.Time, BatchMode.Count] as const)
-                    .default(BatchMode.Off),
+                    .choices([BatchMode.Off, BatchMode.Time, BatchMode.Count, BatchMode.Auto] as const)
+                    .default(BatchMode.Auto),
             )
             .addOption(
                 new Option(
@@ -37,7 +37,11 @@ export default async () => {
             .allowExcessArguments()
             .action(
                 handle(async (container, options) => {
-                    if (options.batchMode !== BatchMode.Off && options.batchTarget === undefined) {
+                    if (
+                        options.batchMode !== BatchMode.Off &&
+                        options.batchMode !== BatchMode.Auto &&
+                        options.batchTarget === undefined
+                    ) {
                         program.error(`--batch-target is required when --batch-mode is '${options.batchMode}'`, {
                             exitCode: 1,
                         });
