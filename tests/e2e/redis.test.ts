@@ -14,7 +14,7 @@ beforeAll(async () => {
     if (connectionString) {
         storageOptions = ['redis', '--connection-string', connectionString];
     } else {
-        container = await new RedisContainer().start();
+        container = await new RedisContainer('redis:7.2').start();
         storageOptions = ['redis', '--connection-string', container.getConnectionUrl()];
     }
 }, 60000);

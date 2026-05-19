@@ -14,7 +14,7 @@ beforeAll(async () => {
     if (connectionString) {
         storageOptions = ['pg', '--connection-string', connectionString];
     } else {
-        container = await new PostgreSqlContainer().start();
+        container = await new PostgreSqlContainer('postgres:13.3-alpine').start();
         storageOptions = ['pg', '--connection-string', container.getConnectionUri()];
     }
 }, 60000);
