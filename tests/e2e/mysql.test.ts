@@ -14,7 +14,7 @@ beforeAll(async () => {
     if (connectionString) {
         storageOptions = ['mysql', '--connection-string', connectionString];
     } else {
-        container = await new MySqlContainer().start();
+        container = await new MySqlContainer('mysql:8.0.31').start();
         storageOptions = ['mysql', '--connection-string', container.getConnectionUri()];
     }
 }, 60000);
