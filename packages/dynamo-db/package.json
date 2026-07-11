@@ -1,6 +1,6 @@
 {
     "name": "@playwright-orchestrator/dynamo-db",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "keywords": [],
     "author": "Rostyslav Kudrevatykh",
     "license": "Apache-2.0",
@@ -13,12 +13,12 @@
         "dist"
     ],
     "dependencies": {
+        "@aws-sdk/client-dynamodb": "^3.1085.0",
+        "@aws-sdk/lib-dynamodb": "^3.1085.0",
         "@commander-js/extra-typings": "^13.0.0",
         "@playwright-orchestrator/core": "workspace:*",
         "commander": "^13.0.0",
-        "@aws-sdk/client-dynamodb": "^3.724.0",
-        "inversify": "^8.0.0-beta.0",
-        "@aws-sdk/lib-dynamodb": "^3.724.0"
+        "inversify": "^8.1.0"
     },
     "main": "dist/index.js",
     "type": "module",

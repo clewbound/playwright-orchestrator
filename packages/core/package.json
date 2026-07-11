@@ -1,6 +1,6 @@
 {
     "name": "@playwright-orchestrator/core",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "description": "Core lib and cli for Playwright test orchestration",
     "keywords": [
         "playwright",
@@ -32,7 +32,7 @@
         "inversify": "^8.0.0-beta.0",
         "log-update": "^6.1.0",
         "reflect-metadata": "^0.2.2",
-        "uuid": "^11.0.3"
+        "uuid": "^14.0.0"
     },
     "engines": {
         "node": ">=18.0.0"
