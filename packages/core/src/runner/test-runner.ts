@@ -56,12 +56,12 @@ export class TestRunner {
         if (config.configFile) {
             this.cleanupFs.add(config.configFile);
         }
-        await this.globalSetupManager.runSetup(config);
+        await this.globalSetupManager.runSetup(config, browsers);
 
         try {
             await this.runTestsUntilAvailable(config, browsers);
         } finally {
-            await this.globalSetupManager.runTeardown(config);
+            await this.globalSetupManager.runTeardown(config, browsers);
             this.reporter.printSummary();
             await this.shardHandler.finishShard();
         }
