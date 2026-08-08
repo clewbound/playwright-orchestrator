@@ -16,14 +16,14 @@ export class GlobalSetupManager {
         @inject(SYMBOLS.PlaywrightConfigLoader) private readonly configLoader: PlaywrightConfigLoader,
     ) {}
 
-    async runSetup(config: TestRunConfig): Promise<void> {
+    async runSetup(config: TestRunConfig, browsers: Record<string, string>): Promise<void> {
         this.loadGlobalHook = loadGlobalHookFn();
         await this.runGlobalSetup(config);
-        await this.runSetupProjects(config);
+        await this.runSetupProjects(config, browsers);
     }
 
-    async runTeardown(config: TestRunConfig): Promise<void> {
-        await this.runTeardownProjects(config);
+    async runTeardown(config: TestRunConfig, browsers: Record<string, string>): Promise<void> {
+        await this.runTeardownProjects(config, browsers);
         await this.runGlobalTeardown(config);
     }
 
@@ -46,36 +46,44 @@ export class GlobalSetupManager {
         }
     }
 
-    private async runSetupProjects(config: TestRunConfig): Promise<void> {
+    private async runSetupProjects(config: TestRunConfig, browsers: Record<string, string>): Promise<void> {
         const setupOrder = this.topologicalSort(config.projects);
         if (setupOrder.length === 0) return;
 
         for (const projectName of setupOrder) {
-            const promise = this.runDependencyProject(projectName, config);
+            const promise = this.runDependencyProject(projectName, config, browsers);
             this.reporter.addLoading(`[ Running dependency project "${projectName}" ]`, promise);
             await promise;
         }
     }
 
-    private async runTeardownProjects(config: TestRunConfig): Promise<void> {
+    private async runTeardownProjects(config: TestRunConfig, browsers: Record<string, string>): Promise<void> {
         const projects = this.collectTeardownProjects(config.projects);
         if (!projects || projects.length === 0) return;
 
         for (const projectName of projects.reverse()) {
-            const promise = this.runDependencyProject(projectName, config);
+            const promise = this.runDependencyProject(projectName, config, browsers);
             this.reporter.addLoading(`[ Running teardown project "${projectName}" ]`, promise);
             await promise;
         }
     }
 
-    private async runDependencyProject(projectName: string, config: TestRunConfig): Promise<void> {
+    private async runDependencyProject(
+        projectName: string,
+        config: TestRunConfig,
+        browsers: Record<string, string>,
+    ): Promise<void> {
         const args = ['--project', projectName, '--reporter', 'list', ...this.cleanArgs(config.args)];
         if (config.configFile) {
             args.push('--config', config.configFile);
         }
-        await runPlaywright(args).then((code) => {
-            if (code !== 0) throw new Error(`Project "${projectName}" failed with exit code ${code}`);
+        const code = await runPlaywright(args, undefined, {
+            ...process.env,
+            ...(config.configFile && {
+                PLAYWRIGHT_ORCHESTRATOR_BROWSERS: JSON.stringify(browsers),
+            }),
         });
+        if (code !== 0) throw new Error(`Project "${projectName}" failed with exit code ${code}`);
     }
 
     private cleanArgs(args: string[]): string[] {
