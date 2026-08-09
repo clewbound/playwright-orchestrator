@@ -44,7 +44,9 @@ runs:
       id: cache
       uses: actions/cache@v4
       with:
-        path: ~/.cache/ms-playwright
+        path: |
+          ~/.cache/ms-playwright
+          ~/AppData/Local/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.version.outputs.PLAYWRIGHT_VERSION }}
 
     - name: Install Playwright browsers
