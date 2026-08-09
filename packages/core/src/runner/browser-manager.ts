@@ -30,12 +30,13 @@ export class BrowserManager {
     }
 
     private async setupBrowser(project: Project): Promise<void> {
-        if (!project.use?.defaultBrowserType) {
+        const browserType = project.use?.browserName ?? project.use?.defaultBrowserType;
+        if (!browserType) {
             return;
         }
         try {
-            const browserLauncher = playwright[project.use.defaultBrowserType];
-            const message = `[ Setting up browser for project "${project.name}" with type: ${project.use.defaultBrowserType} ]`;
+            const browserLauncher = playwright[browserType];
+            const message = `[ Setting up browser for project "${project.name}" with type: ${browserType} ]`;
             const setup = browserLauncher.launchServer(project?.use?.launchOptions).then((browser) => {
                 this.browsers.set(project.name, browser);
             });

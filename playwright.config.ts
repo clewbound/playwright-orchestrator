@@ -47,7 +47,7 @@ export default defineConfig({
         },
         {
             name: 'chromium',
-            use: { ...devices['Desktop Chrome'] },
+            use: { browserName: 'chromium' },
             outputDir: './test-results/chromium',
             dependencies: ['setup'],
             teardown: 'teardown',

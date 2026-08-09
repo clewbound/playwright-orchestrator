@@ -162,9 +162,10 @@ config.globalSetup = undefined;
 config.globalTeardown = undefined;
 for (const project of config?.projects ?? []) {
     if (!project.use) project.use = {};
-    if (!project.use.connectOptions) project.use.connectOptions = {};
-    if (!project.use.connectOptions.wsEndpoint) {
-        project.use.connectOptions.wsEndpoint = browsers[project.name!];
+    const wsEndpoint = browsers[project.name!];
+    if (wsEndpoint) {
+        if (!project.use.connectOptions) project.use.connectOptions = {};
+        project.use.connectOptions.wsEndpoint = wsEndpoint;
     }
     project.dependencies = [];
     project.teardown = undefined;
