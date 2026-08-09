@@ -54,14 +54,21 @@ jobs:
         run: pnpm test --exclude "**/e2e/**"
 
   test-file:
-    needs: check-changes
     if: contains(needs.check-changes.outputs.projects, 'core') || contains(needs.check-changes.outputs.projects, 'file')
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    needs: check-changes
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/e2e-setup
+      - name: Start web server
+        shell: bash
+        run: npx --yes http-server ./e2e/web-server-simulation -p 4321 --silent &
       - name: Run tests
-        run: pnpm test:ci file.test.ts
+        run: pnpm exec vitest run --pool=threads --maxWorkers=1 file.test.ts
 
   test-dynamo-db:
     needs: check-changes

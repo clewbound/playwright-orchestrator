@@ -132,7 +132,7 @@ export class TestRunner {
         const args = [];
         const projects = new Set<string>();
         for (const test of tests) {
-            args.push(`${test.file}:${test.position}`);
+            args.push(`${test.file.replace(/\\/g, '/')}:${test.position}`);
             for (const project of test.projects) {
                 projects.add(project);
             }
@@ -153,7 +153,7 @@ export class TestRunner {
         if (!file) return;
         // Browser endpoints are injected via PLAYWRIGHT_ORCHESTRATOR_BROWSERS env var.
         const content = `
-import config from '${path.resolve(file)}';
+import config from '${path.resolve(file).replace(/\\/g, '/')}';
 
 const browsers: Record<string, string> = JSON.parse(process.env.PLAYWRIGHT_ORCHESTRATOR_BROWSERS ?? '{}');
 
