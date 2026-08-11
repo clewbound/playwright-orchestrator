@@ -87,6 +87,43 @@ export class PgShardHandler implements ShardHandler {
         }
     }
 
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Re-assert Ongoing so a result that landed between the claim and this call is
+            // not reverted, and so a repeated release is a no-op.
+            const result = await client.query({
+                text: `UPDATE ${this.testsTable}
+                SET status = $3, updated = NOW()
+                WHERE run_id = $1 AND status = $2 AND order_num = ANY($4::int[])
+                RETURNING ema`,
+                values: [runId, TestStatus.Ongoing, TestStatus.Ready, tests.map((test) => test.order)],
+            });
+            if (result.rowCount === 0) {
+                await client.query('COMMIT');
+                return;
+            }
+            const releasedTime = result.rows.reduce((sum, { ema }) => sum + Number(ema), 0);
+            await client.query({
+                text: `UPDATE ${this.configTable}
+                SET config = jsonb_set(jsonb_set(config,
+                    '{remainingCount}', ((config->>'remainingCount')::bigint + $2)::text::jsonb),
+                    '{remainingTime}', ((config->>'remainingTime')::float + $3)::text::jsonb)
+                WHERE id = $1`,
+                values: [runId, result.rowCount, releasedTime],
+            });
+            await client.query('COMMIT');
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
     async startShard(): Promise<TestRunConfig> {
         const { runId, shardId } = this.runContext;
         const client = await this.pool.connect();

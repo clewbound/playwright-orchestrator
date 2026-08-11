@@ -99,20 +99,44 @@ export class FileShardHandler implements ShardHandler {
             if (index === -1) return undefined;
             const [test] = tests.splice(index, 1);
             await writeFile(file, JSON.stringify(tests, null, 2));
-            await this.decrementCounters(runId, test.ema);
+            await this.adjustCounters(runId, -1, -test.ema);
             return test;
         } finally {
             await release();
         }
     }
 
-    private async decrementCounters(runId: string, ema: number): Promise<void> {
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        const file = getRunIdFilePath(this.dir, runId);
+        const release = await lock(file, { retries: 100 });
+        try {
+            const queued = JSON.parse(await readFile(file, 'utf-8')) as TestItem[];
+            const queuedOrders = new Set(queued.map(({ order }) => order));
+            const restored = tests.filter(({ order }) => !queuedOrders.has(order));
+            if (restored.length === 0) return;
+            queued.push(...restored);
+            // popNextTest takes from the end, so the queue is kept sorted by descending order.
+            queued.sort((a, b) => b.order - a.order);
+            await writeFile(file, JSON.stringify(queued, null, 2));
+            await this.adjustCounters(
+                runId,
+                restored.length,
+                restored.reduce((sum, test) => sum + test.ema, 0),
+            );
+        } finally {
+            await release();
+        }
+    }
+
+    private async adjustCounters(runId: string, countDelta: number, timeDelta: number): Promise<void> {
         const configFile = getRunConfigPath(this.dir, runId);
         const release = await lock(configFile, { retries: 100 });
         try {
             const testRun = JSON.parse(await readFile(configFile, 'utf-8')) as TestRun;
-            testRun.config.remainingCount = (testRun.config.remainingCount ?? 1) - 1;
-            testRun.config.remainingTime = (testRun.config.remainingTime ?? 0) - ema;
+            testRun.config.remainingCount = (testRun.config.remainingCount ?? 0) + countDelta;
+            testRun.config.remainingTime = (testRun.config.remainingTime ?? 0) + timeDelta;
             await writeFile(configFile, JSON.stringify(testRun, null, 2));
         } finally {
             await release();

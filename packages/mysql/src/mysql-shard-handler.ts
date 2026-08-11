@@ -116,6 +116,49 @@ export class MySQLShardHandler implements ShardHandler {
         }
     }
 
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        const client = await this.pool.getConnection();
+        try {
+            await client.beginTransaction();
+            // Re-assert Ongoing so a result that landed between the claim and this call is
+            // not reverted, and so a repeated release is a no-op. Locking the rows up front
+            // keeps the counter adjustment in step with the rows actually flipped, which
+            // MySQL cannot report back from the UPDATE itself.
+            const [claimed] = await client.query<Test[]>(
+                `SELECT order_num, ema FROM ??
+                WHERE run_id = UUID_TO_BIN(?) AND status = ? AND order_num IN (?)
+                FOR UPDATE`,
+                [this.testsTable, runId, TestStatus.Ongoing, tests.map((test) => test.order)],
+            );
+            if (claimed.length > 0) {
+                await client.query(
+                    `UPDATE ?? SET status = ?, updated = CURRENT_TIMESTAMP
+                    WHERE run_id = UUID_TO_BIN(?) AND order_num IN (?)`,
+                    [this.testsTable, TestStatus.Ready, runId, claimed.map(({ order_num }) => order_num)],
+                );
+                const releasedTime = claimed.reduce((sum, { ema }) => sum + Number(ema), 0);
+                await client.query(
+                    `UPDATE ??
+                    SET config = JSON_SET(
+                        config,
+                        '$.remainingCount', COALESCE(config->>'$.remainingCount', 0) + ?,
+                        '$.remainingTime', COALESCE(config->>'$.remainingTime', 0) + ?
+                    )
+                    WHERE id = UUID_TO_BIN(?)`,
+                    [this.configTable, claimed.length, releasedTime, runId],
+                );
+            }
+            await client.commit();
+        } catch (e) {
+            await client.rollback();
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
     async startShard(): Promise<TestRunConfig> {
         const { runId, shardId } = this.runContext;
         const client = await this.pool.getConnection();

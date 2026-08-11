@@ -7,6 +7,7 @@ import * as uuid from 'uuid';
 import { injectable, inject } from 'inversify';
 import type { ShardHandler } from '../adapters/shard-handler.js';
 import type { BatchHandlerFactory } from '../commands/run.js';
+import type { BatchHandler } from '../batch/batch-handler.js';
 import { BrowserManager } from './browser-manager.js';
 import { WebServerManager } from './web-server-manager.js';
 import { GlobalSetupManager } from './global-setup-manager.js';
@@ -14,8 +15,9 @@ import { SYMBOLS } from '../symbols.js';
 import { runPlaywright } from '../helpers/run-playwright.js';
 import type { TestEventHandlerFactory } from './test-event-handler.js';
 import { cliVersion } from '../commands/version.js';
-import { registerOnExit } from '../helpers/register-on-exit.js';
+import { registerAsyncOnExit, registerOnExit } from '../helpers/register-on-exit.js';
 import { PlaywrightConfigLoader } from '../helpers/playwright-config.js';
+import { ClaimedTests } from './claimed-tests.js';
 
 @injectable()
 export class TestRunner {
@@ -31,10 +33,12 @@ export class TestRunner {
         @inject(SYMBOLS.TestExecutionReporter) private readonly reporter: TestExecutionReporter,
         @inject(SYMBOLS.TestEventHandlerFactory) private readonly testEventHandlerFactory: TestEventHandlerFactory,
         @inject(SYMBOLS.PlaywrightConfigLoader) private readonly configLoader: PlaywrightConfigLoader,
+        @inject(SYMBOLS.ClaimedTests) private readonly claimedTests: ClaimedTests,
     ) {
         registerOnExit(() => {
             this.cleanupTemp();
         });
+        registerAsyncOnExit(() => this.releaseClaimedTests());
     }
 
     async runTests(): Promise<boolean> {
@@ -61,11 +65,26 @@ export class TestRunner {
         try {
             await this.runTestsUntilAvailable(config, browsers);
         } finally {
+            // A batch whose subprocess dies before reporting leaves its tests claimed even
+            // though this shard ran to completion. Released ahead of teardown so a failing
+            // teardown cannot strand them, and so other shards can pick them up sooner.
+            await this.releaseClaimedTests();
             await this.globalSetupManager.runTeardown(config, browsers);
             this.reporter.printSummary();
             await this.shardHandler.finishShard();
         }
         return !this.reporter.hasFailed();
+    }
+
+    private async releaseClaimedTests() {
+        const outstanding = this.claimedTests.drain();
+        if (outstanding.length === 0) return;
+        try {
+            await this.shardHandler.releaseTests(outstanding);
+            console.log(`Released ${outstanding.length} unfinished test(s) back to the queue`);
+        } catch (err) {
+            console.error(`Failed to release ${outstanding.length} claimed test(s):`, err);
+        }
     }
 
     private cleanupTemp() {
@@ -83,7 +102,7 @@ export class TestRunner {
         const batchHandler = this.batchHandlerFactory(config.options.batchMode);
         const runningBatches = new Set<Promise<void>>();
         let batchNumber = 0;
-        let nextBatch = await batchHandler.getNextBatch(config);
+        let nextBatch = await this.claimNextBatch(batchHandler, config);
         while (nextBatch || runningBatches.size > 0) {
             if (nextBatch && runningBatches.size < config.workers) {
                 batchNumber++;
@@ -91,12 +110,20 @@ export class TestRunner {
                     runningBatches.delete(batchPromise);
                 });
                 runningBatches.add(batchPromise);
-                nextBatch = await batchHandler.getNextBatch(config);
+                nextBatch = await this.claimNextBatch(batchHandler, config);
             } else {
                 await Promise.race(runningBatches);
             }
         }
         await Promise.all(runningBatches);
+    }
+
+    private async claimNextBatch(batchHandler: BatchHandler, config: TestRunConfig) {
+        const batch = await batchHandler.getNextBatch(config);
+        // Tests are owed back from the moment storage hands them over, not from the moment a
+        // batch starts — a shard killed while waiting for a free worker still holds the claim.
+        if (batch) this.claimedTests.add(batch);
+        return batch;
     }
 
     private async runTestBatch(

@@ -65,6 +65,8 @@ Each worker runs the same `playwright-orchestrator run` command and loops indepe
 
 Workers don't coordinate directly. Fast workers naturally pick up more tests. Slow machines or flaky tests don't block the others.
 
+Pulling a test claims it, so no other worker can take it. If a worker is interrupted — a cancelled CI job, a `SIGTERM` from a shutting-down runner — it puts its unfinished tests back on the queue before exiting, and the remaining workers pick them up. Results already written to storage are left alone.
+
 ### EMA Scheduling
 
 **Tests are ordered as follows:**

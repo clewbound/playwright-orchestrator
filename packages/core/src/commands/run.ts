@@ -14,6 +14,7 @@ import { WebServerManager } from '../runner/web-server-manager.js';
 import { GlobalSetupManager } from '../runner/global-setup-manager.js';
 import { BrowserManager } from '../runner/browser-manager.js';
 import { TestExecutionReporter } from '../runner/test-execution-reporter.js';
+import { ClaimedTests } from '../runner/claimed-tests.js';
 import { PlaywrightConfigLoader } from '../helpers/playwright-config.js';
 import { Container } from 'inversify';
 import * as uuid from 'uuid';
@@ -78,6 +79,7 @@ function registerServices(container: Container) {
             return handler.init(tests, config, batchName);
         };
     });
+    container.bind(SYMBOLS.ClaimedTests).to(ClaimedTests).inSingletonScope();
     container.bind(SYMBOLS.TestExecutionReporter).to(TestExecutionReporter).inSingletonScope();
     container.bind(SYMBOLS.BrowserManager).to(BrowserManager).inSingletonScope();
     container.bind(SYMBOLS.WebServerManager).to(WebServerManager).inSingletonScope();

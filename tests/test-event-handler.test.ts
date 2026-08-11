@@ -4,6 +4,7 @@ import type { TestItem, TestRunConfig } from '../packages/core/src/types/adapter
 import { Grouping, BatchMode } from '../packages/core/src/types/adapters.js';
 import type { Adapter } from '../packages/core/src/adapters/adapter.js';
 import { TestExecutionReporter } from '../packages/core/src/runner/test-execution-reporter.js';
+import { ClaimedTests } from '../packages/core/src/runner/claimed-tests.js';
 
 function makeConfig(repeatEach = 1): TestRunConfig {
     return {
@@ -69,8 +70,9 @@ function makeHandler() {
     vi.spyOn(reporter, 'addBatch').mockImplementation(() => {});
     vi.spyOn(reporter, 'addGroup').mockImplementation(() => {});
     const addTestSpy = vi.spyOn(reporter, 'addTest').mockImplementation(() => {});
-    const handler = new PlaywrightTestEventHandler('run-id', adapter, reporter);
-    return { handler, adapter, reporter, addTestSpy };
+    const claimedTests = new ClaimedTests();
+    const handler = new PlaywrightTestEventHandler('run-id', adapter, reporter, claimedTests);
+    return { handler, adapter, reporter, addTestSpy, claimedTests };
 }
 
 describe('PlaywrightTestEventHandler — repeatEach', () => {

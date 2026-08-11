@@ -90,6 +90,31 @@ export class DynamoDbShardHandler implements ShardHandler {
         return await this.getNextTestByStatus(runId, StatusOffset.Pending, project);
     }
 
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        // Claiming deletes the item outright, so a release re-inserts it at the pending
+        // offset. Results are written under a different sort key and are left untouched.
+        for (const test of tests) {
+            await this.addPendingTestItem(runId, test);
+        }
+        const releasedTime = tests.reduce((sum, test) => sum + test.ema, 0);
+        await this.connection.docClient.send(
+            new UpdateCommand({
+                TableName: this.testsTableName,
+                Key: { [Fields.Id]: runId, [Fields.Order]: 0 },
+                UpdateExpression:
+                    'SET #cfg.#rc = if_not_exists(#cfg.#rc, :zero) + :rc, #cfg.#rt = if_not_exists(#cfg.#rt, :zero) + :rt',
+                ExpressionAttributeNames: {
+                    '#cfg': Fields.Config,
+                    '#rc': 'remainingCount',
+                    '#rt': 'remainingTime',
+                },
+                ExpressionAttributeValues: { ':zero': 0, ':rc': tests.length, ':rt': releasedTime },
+            }),
+        );
+    }
+
     private async getTestRun(runId: string): Promise<TestRunDb> {
         const configRequest = await this.connection.docClient.send(
             new GetCommand({

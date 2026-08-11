@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
 import type { ShardHandler, TestRunConfig, TestRunContext } from '@playwright-orchestrator/core';
-import { RunStatus, SYMBOLS } from '@playwright-orchestrator/core';
+import { Grouping, RunStatus, SYMBOLS } from '@playwright-orchestrator/core';
 import type { TestItem } from '@playwright-orchestrator/core';
 import type { CreateArgs } from './create-args.js';
 import { RedisConnection } from './redis-connection.js';
@@ -68,6 +68,28 @@ return nil`;
         const test: TestItem = JSON.parse(res);
         await this.decrementCounters(test.ema);
         return test;
+    }
+
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        const client = await this.connection.getClient();
+        const { options } = await this.loadConfig();
+        const groupByProject = options.grouping === Grouping.Project;
+        const queueKey = `${this._namePrefix}:${TESTS}:${runId}:queue`;
+        const multi = client.multi();
+        // Released tests were the head of the queue when claimed, so they go back to the head.
+        // Pushing in reverse keeps their relative order.
+        for (const test of [...tests].reverse()) {
+            const key = groupByProject && test.projects.length === 1 ? `${queueKey}:${test.projects[0]}` : queueKey;
+            multi.lPush(key, JSON.stringify(test));
+        }
+        const releasedTime = tests.reduce((sum, test) => sum + test.ema, 0);
+        const runKey = `${this._namePrefix}:${TEST_RUN}:${runId}`;
+        await multi
+            .incrBy(`${runKey}:remainingCount`, tests.length)
+            .incrByFloat(`${runKey}:remainingTime`, releasedTime)
+            .exec();
     }
 
     async startShard(): Promise<TestRunConfig> {

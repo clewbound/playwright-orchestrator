@@ -6,6 +6,7 @@ import { TestExecutionReporter } from './test-execution-reporter.js';
 import type { Adapter } from '../adapters/adapter.js';
 import { SYMBOLS } from '../symbols.js';
 import { Project, TestStatus } from '../types/test-info.js';
+import { ClaimedTests } from './claimed-tests.js';
 
 type HandlerResult = {
     onData: (data: any, isError: boolean) => void;
@@ -37,6 +38,7 @@ export class PlaywrightTestEventHandler implements TestEventHandler {
         @inject(SYMBOLS.RunContext) private readonly runContext: TestRunContext,
         @inject(SYMBOLS.Adapter) private readonly adapter: Adapter,
         @inject(SYMBOLS.TestExecutionReporter) private readonly reporter: TestExecutionReporter,
+        @inject(SYMBOLS.ClaimedTests) private readonly claimedTests: ClaimedTests,
     ) {}
 
     public init(tests: TestItem[], config: TestRunConfig, batchName: string) {
@@ -195,5 +197,8 @@ export class PlaywrightTestEventHandler implements TestEventHandler {
             },
             config,
         });
+        // Only after the result is durable: a write that threw leaves the test claimed, and
+        // it still needs releasing.
+        this.claimedTests.settle(test.testId);
     }
 }

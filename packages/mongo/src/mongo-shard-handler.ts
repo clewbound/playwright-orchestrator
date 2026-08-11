@@ -52,6 +52,29 @@ export class MongoShardHandler implements ShardHandler {
         return { file, position: `${line}:${column}`, projects, timeout, ema, order, children, testId };
     }
 
+    async releaseTests(tests: TestItem[]): Promise<void> {
+        if (tests.length === 0) return;
+        const { runId } = this.runContext;
+        let releasedCount = 0;
+        let releasedTime = 0;
+        // Released one at a time so each flip is atomic and reports the EMA it gave back;
+        // updateMany would leave no way to tell which documents were actually still Ongoing.
+        for (const test of tests) {
+            const released = await this.tests.findOneAndUpdate(
+                { _id: generateTestId(runId, test.order), status: TestStatus.Ongoing },
+                { $set: { status: TestStatus.Ready, updated: new Date() } },
+            );
+            if (!released) continue;
+            releasedCount++;
+            releasedTime += released.ema;
+        }
+        if (releasedCount === 0) return;
+        await this.runs.updateOne(
+            { _id: generateRunId(runId) },
+            { $inc: { 'config.remainingCount': releasedCount, 'config.remainingTime': releasedTime } },
+        );
+    }
+
     async startShard(): Promise<TestRunConfig> {
         const { runId, shardId } = this.runContext;
         const now = new Date();
