@@ -59,6 +59,43 @@ export class PostgreSQLAdapter extends BaseAdapter {
         };
     }
 
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const result = await client.query({
+                text: `UPDATE ${this.testsTable}
+                SET status = $3, updated = NOW()
+                WHERE run_id = $1 AND status = $2 AND updated < NOW() - INTERVAL '1 minute' * $4::float
+                RETURNING ema`,
+                values: [runId, TestStatus.Ongoing, TestStatus.Ready, staleMinutes],
+            });
+            const reclaimedCount = result.rowCount ?? 0;
+            if (reclaimedCount === 0) {
+                await client.query('COMMIT');
+                return 0;
+            }
+            // The claim decremented the remaining counters; the queue is only consistent again
+            // once what was handed back is added to them.
+            const reclaimedTime = result.rows.reduce((sum, { ema }) => sum + Number(ema), 0);
+            await client.query({
+                text: `UPDATE ${this.configTable}
+                SET config = jsonb_set(jsonb_set(config,
+                    '{remainingCount}', ((config->>'remainingCount')::bigint + $2)::text::jsonb),
+                    '{remainingTime}', ((config->>'remainingTime')::float + $3)::text::jsonb)
+                WHERE id = $1`,
+                values: [runId, reclaimedCount, reclaimedTime],
+            });
+            await client.query('COMMIT');
+            return reclaimedCount;
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
     async getTestEma(testId: string): Promise<number> {
         const {
             rows: [testInfo],

@@ -38,6 +38,11 @@ interface TestInfo extends RowDataPacket {
     fails: number;
 }
 
+interface StaleTest extends RowDataPacket {
+    order_num: number;
+    ema: number;
+}
+
 interface HistoryRow extends RowDataPacket {
     status: number;
     duration: number;
@@ -93,6 +98,52 @@ export class MySQLAdapter extends BaseAdapter {
                 };
             }),
         };
+    }
+
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const client = await this.pool.getConnection();
+        try {
+            await client.beginTransaction();
+            // Selected and locked up front because MySQL cannot report which rows an UPDATE
+            // touched, and the counter adjustment has to match the rows actually flipped.
+            // Seconds rather than minutes so a fractional --stale-minutes is not truncated.
+            const [stale] = await client.query<StaleTest[]>(
+                `SELECT order_num, ema FROM ??
+                WHERE run_id = UUID_TO_BIN(?) AND status = ?
+                AND updated < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND)
+                FOR UPDATE`,
+                [this.testsTable, runId, TestStatus.Ongoing, Math.round(staleMinutes * 60)],
+            );
+            if (stale.length === 0) {
+                await client.commit();
+                return 0;
+            }
+            await client.query(
+                `UPDATE ?? SET status = ?, updated = CURRENT_TIMESTAMP
+                WHERE run_id = UUID_TO_BIN(?) AND order_num IN (?)`,
+                [this.testsTable, TestStatus.Ready, runId, stale.map(({ order_num }) => order_num)],
+            );
+            // The claim decremented the remaining counters; the queue is only consistent again
+            // once what was handed back is added to them.
+            const reclaimedTime = stale.reduce((sum, { ema }) => sum + Number(ema), 0);
+            await client.query(
+                `UPDATE ??
+                SET config = JSON_SET(
+                    config,
+                    '$.remainingCount', COALESCE(config->>'$.remainingCount', 0) + ?,
+                    '$.remainingTime', COALESCE(config->>'$.remainingTime', 0) + ?
+                )
+                WHERE id = UUID_TO_BIN(?)`,
+                [this.configTable, stale.length, reclaimedTime, runId],
+            );
+            await client.commit();
+            return stale.length;
+        } catch (e) {
+            await client.rollback();
+            throw e;
+        } finally {
+            client.release();
+        }
     }
 
     async getTestEma(testId: string): Promise<number> {

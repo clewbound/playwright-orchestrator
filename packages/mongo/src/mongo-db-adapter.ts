@@ -62,6 +62,35 @@ export class MongoDbAdapter extends BaseAdapter {
         };
     }
 
+    async cleanupStaleTests(runId: string, staleMinutes: number): Promise<number> {
+        const threshold = new Date(Date.now() - staleMinutes * 60 * 1000);
+        const stale = await this.tests
+            .find({ ...this.generateTestIdQuery(runId, TestStatus.Ongoing), updated: { $lt: threshold } })
+            .toArray();
+        let reclaimedCount = 0;
+        let reclaimedTime = 0;
+        // Flipped one document at a time so each reports the EMA it gave back, and so a result
+        // that landed since the scan is skipped rather than overwritten. updateMany can do
+        // neither.
+        for (const { _id } of stale) {
+            const reclaimed = await this.tests.findOneAndUpdate(
+                { _id, status: TestStatus.Ongoing },
+                { $set: { status: TestStatus.Ready, updated: new Date() } },
+            );
+            if (!reclaimed) continue;
+            reclaimedCount++;
+            reclaimedTime += reclaimed.ema;
+        }
+        if (reclaimedCount === 0) return 0;
+        // The claim decremented the remaining counters; the queue is only consistent again
+        // once what was handed back is added to them.
+        await this.runs.updateOne(
+            { _id: generateRunId(runId) },
+            { $inc: { 'config.remainingCount': reclaimedCount, 'config.remainingTime': reclaimedTime } },
+        );
+        return reclaimedCount;
+    }
+
     async getTestEma(testId: string): Promise<number> {
         const doc = await this.testInfo.findOne({ _id: testId });
         return doc?.ema ?? 0;

@@ -1,9 +1,17 @@
-import { it, afterAll, beforeAll, describe } from 'vitest';
+import { it, expect, afterAll, beforeAll, describe } from 'vitest';
 import { rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
 import { testStorage } from '../utils/test-storage.js';
 import { TEST_TIMEOUT } from '../utils/constants.js';
 import { Grouping } from '../../packages/core/src/types/adapters.js';
+import { TestStatus } from '../../packages/core/src/types/test-info.js';
+import { spawnAsync } from '../../packages/core/src/helpers/spawn.js';
+import { PgPool } from '../../packages/pg/src/pg-pool.js';
+import { PgShardHandler } from '../../packages/pg/src/pg-shard-handler.js';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+
+const orchestratorCli = createRequire(join(process.cwd(), 'package.json')).resolve('@playwright-orchestrator/core/cli');
 
 const reportsFolder = './test-reports-folder-pg';
 let container: StartedPostgreSqlContainer | undefined;
@@ -39,4 +47,129 @@ describe('PostgreSQL plugin', () => {
         },
         TEST_TIMEOUT,
     );
+
+    it(
+        'returns abandoned claims to the queue once they pass the stale threshold',
+        async () => {
+            const tableNamePrefix = 'cleanup_stale';
+            const { handler, pool, runId, args } = await createRunForCleanup(tableNamePrefix);
+            try {
+                const config = await handler.startShard();
+                const before = await handler.getRemainingCounters(config);
+
+                const claimed = [await handler.getNextTest(config), await handler.getNextTest(config)].filter(
+                    (test) => test !== undefined,
+                );
+                expect(claimed).toHaveLength(2);
+                expect(await readStatuses(pool, tableNamePrefix, runId, claimed)).toEqual([
+                    TestStatus.Ongoing,
+                    TestStatus.Ongoing,
+                ]);
+
+                const fresh = await runCleanup(args, runId, '10');
+                expect(fresh).toContain('Returned 0 stale test(s)');
+                expect(await readStatuses(pool, tableNamePrefix, runId, claimed)).toEqual([
+                    TestStatus.Ongoing,
+                    TestStatus.Ongoing,
+                ]);
+
+                // Stands in for every shard having exited, which is the only time a zero
+                // threshold cannot reclaim a test that is still running.
+                const stale = await runCleanup(args, runId, '0');
+                expect(stale).toContain('Returned 2 stale test(s)');
+                expect(await readStatuses(pool, tableNamePrefix, runId, claimed)).toEqual([
+                    TestStatus.Ready,
+                    TestStatus.Ready,
+                ]);
+                const after = await handler.getRemainingCounters(config);
+                expect(after.remainingCount).toBe(before.remainingCount);
+                expect(after.remainingTime).toBeCloseTo(before.remainingTime, 5);
+            } finally {
+                await pool.dispose();
+            }
+        },
+        TEST_TIMEOUT,
+    );
+
+    it(
+        'leaves a finished test alone',
+        async () => {
+            const tableNamePrefix = 'cleanup_finished';
+            const { handler, pool, runId, args } = await createRunForCleanup(tableNamePrefix);
+            try {
+                const config = await handler.startShard();
+                const claimed = await handler.getNextTest(config);
+                expect(claimed).toBeDefined();
+                const claimedCounters = await handler.getRemainingCounters(config);
+
+                await pool.pool.query(
+                    `UPDATE ${tableNamePrefix}_tests SET status = $3 WHERE run_id = $1 AND order_num = $2`,
+                    [runId, claimed!.order, TestStatus.Passed],
+                );
+
+                const output = await runCleanup(args, runId, '0');
+                expect(output).toContain('Returned 0 stale test(s)');
+                expect(await readStatuses(pool, tableNamePrefix, runId, [claimed!])).toEqual([TestStatus.Passed]);
+                const after = await handler.getRemainingCounters(config);
+                expect(after.remainingCount).toBe(claimedCounters.remainingCount);
+                expect(after.remainingTime).toBeCloseTo(claimedCounters.remainingTime, 5);
+            } finally {
+                await pool.dispose();
+            }
+        },
+        TEST_TIMEOUT,
+    );
 });
+
+/**
+ * Builds a run in its own set of tables and returns a shard handler wired straight to it, so a
+ * claim can be left outstanding on purpose instead of racing a real test run.
+ */
+async function createRunForCleanup(tableNamePrefix: string) {
+    const connectionString = storageOptions[2];
+    const args = [...storageOptions, '--table-name-prefix', tableNamePrefix];
+    const init = await spawnAsync(process.execPath, [orchestratorCli, 'init', ...args]);
+    expect(init.stdout, `Init command failed. Error: ${init.stderr}`).toBeTruthy();
+    const create = await spawnAsync(process.execPath, [
+        orchestratorCli,
+        'create',
+        ...args,
+        '--config',
+        'tests-playwright.config.ts',
+    ]);
+    const runId = create.stdout.trim();
+    expect(runId, `Create command failed. Error: ${create.stderr}`).toBeTruthy();
+
+    const createArgs = { connectionString, tableNamePrefix };
+    const pool = new PgPool(createArgs);
+    const handler = new PgShardHandler(createArgs, pool, {
+        runId,
+        shardId: 'cleanup-shard',
+        outputFolder: reportsFolder,
+    });
+    return { handler, pool, runId, args };
+}
+
+async function runCleanup(args: string[], runId: string, staleMinutes: string) {
+    const result = await spawnAsync(process.execPath, [
+        orchestratorCli,
+        'cleanup',
+        ...args,
+        '--run-id',
+        runId,
+        '--stale-minutes',
+        staleMinutes,
+    ]);
+    expect(result.stdout, `Cleanup command failed. Error: ${result.stderr}`).toBeTruthy();
+    return result.stdout;
+}
+
+async function readStatuses(pool: PgPool, tableNamePrefix: string, runId: string, tests: { order: number }[]) {
+    const { rows } = await pool.pool.query(
+        `SELECT status FROM ${tableNamePrefix}_tests
+        WHERE run_id = $1 AND order_num = ANY($2::int[])
+        ORDER BY order_num`,
+        [runId, tests.map(({ order }) => order)],
+    );
+    return rows.map(({ status }) => status as TestStatus);
+}
